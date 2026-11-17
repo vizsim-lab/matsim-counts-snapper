@@ -1,7 +1,7 @@
 // MATSim Counts Snapper: Netz laden, Dauerzählstellen der Zählkarte auf Links legen, prüfen,
 // mitteln und als counts.xml ausgeben. Das Netz liegt im Worker; hier leben Karte und Oberfläche.
 import { STANDARD_DATEN, VERTRAG, GRUPPEN, leseIndex, leseStunden, detailPfad, tagNr, isoTag } from "./lib/zaehlkarte.js";
-import { kurz } from "./lib/richtung.js";
+import { kurz, lang } from "./lib/richtung.js";
 import { verteile } from "./lib/zuordnung.js";
 import { VORGABE as MITTEL_VORGABE, WOCHENTAGE, mittle, aggregatText, auswahlText } from "./lib/mitteln.js";
 import { countsXml, zuordnungCsv, leseZuordnungCsv } from "./lib/counts.js";
@@ -1001,8 +1001,13 @@ function verteileNeu() {
     if (e?.aus) return [];
     return state.ergebnisse.get(s.id)?.kandidaten ?? [];
   });
-  const wahl = verteile(kandidaten, fest);
+  const wahl = verteile(kandidaten, fest, liste.map(ausgabeModi));
   state.wahl = new Map(liste.map((s, idx) => [s.id, wahl[idx]]));
+}
+
+/** Die networkModes, die eine Stelle ausgibt; ein Link trägt je Verkehrsmittel nur eine Stelle. */
+function ausgabeModi(s) {
+  return [...new Set(s.aktiv.map((g) => state.gruppen[g].mode))];
 }
 
 /** Der Link einer Stelle: von Hand, sonst automatisch. */
@@ -1016,7 +1021,14 @@ function linkVon(s) {
 function gruendeVon(s) {
   const w = state.wahl.get(s.id);
   const k = state.ergebnisse.get(s.id)?.kandidaten ?? [];
-  if (!w) return [k.length ? "Alle Links im Umkreis sind an andere Stellen vergeben." : "Kein passender Link im Umkreis."];
+  if (!w) {
+    if (k.length) return ["Alle passenden Links im Umkreis sind an andere Stellen mit demselben Verkehrsmittel vergeben."];
+    const u = state.ergebnisse.get(s.id)?.umkreis;
+    const r = Number($("radius").value) || 50;
+    if (!u?.links) return [`Im Umkreis von ${de(r)} m liegt kein Link.`];
+    if (!u.modus) return [`Im Umkreis liegen ${de(u.links)} Links, aber keiner erlaubt ${s.modi.join(" oder ")}. Hat das Netz dieses Verkehrsmittel? Sonst unter „Link erlaubt“ anpassen.`];
+    return [`Im Umkreis liegen ${de(u.modus)} Links mit ${s.modi.join(" oder ")}, aber keiner weicht höchstens ${de(Number($("winkel").value) || 60)}° von der Fahrtrichtung ab.`];
+  }
   const out = [];
   if (s.r.grad == null) out.push(`Die Quelle nennt nur das Ziel („${s.r.ziel}“), keine Himmelsrichtung: Hin- oder Rückrichtung prüfen.`);
   if (w.d > WEIT_M) out.push(`Der Link liegt ${de(w.d)} m von der Stelle entfernt.`);
@@ -1033,6 +1045,8 @@ function lageVon(s) {
   return gruendeVon(s).length ? "pruefen" : "passt";
 }
 const zaehle = (lage) => state.stellen.filter((s) => lageVon(s) === lage).length;
+/** Die Richtung einer Stelle in Worten; steht sie nur im Namen oder in der Kennung, mit Hinweis. */
+const richtungsText = (s) => s.richtungText || (s.r.ausNamen ? `Richtung ${lang(s.r.grad)} (aus Name oder Kennung)` : "");
 
 // ---------- Entscheidungen ----------
 const speicherSchluessel = () => (state.netz ? `snapper.entscheide:${state.netz.key}` : null);
@@ -1099,10 +1113,12 @@ async function nimmLink(id, { i, link = null }) {
   }
   if (!link) return;
   let meldung = `${s.name || s.id}: Link ${link.id} festgelegt.`;
+  const modi = ausgabeModi(s);
   for (const [andere, e] of state.entscheid) {
-    if (andere !== id && e.link?.id === link.id) {
+    const t = state.byId.get(andere);
+    // ein Link trägt eine Kfz- und eine Rad-Stelle; nur wer dasselbe Verkehrsmittel ausgibt, muss weichen
+    if (andere !== id && e.link?.id === link.id && (!t || ausgabeModi(t).some((m) => modi.includes(m)))) {
       e.link = null;
-      const t = state.byId.get(andere);
       meldung += ` ${t?.name || andere} hatte ihn und sucht neu.`;
     }
   }
@@ -1277,9 +1293,9 @@ $("gruppen-body").addEventListener("change", (e) => {
   else cfg[el.dataset.f] = el.value.trim();
   store.set("snapper.gruppen", JSON.stringify(state.gruppen));
   if (el.dataset.f === "mode") {
+    verteileNeu();
     mittleAlle();
-    renderExport();
-    renderKarte();
+    renderAlles();
   } else waehleStellen();
 });
 for (const id of ["radius", "winkel"]) $(id).addEventListener("change", () => state.netz && suche());
@@ -1338,7 +1354,7 @@ function renderListe() {
     b.innerHTML = `<span class="dot" style="--c: var(${LAGE_FARBE[lage]})" title="${esc(LAGE_TEXT[lage])}"></span>
       <span class="t">${esc(s.name || s.id)} <small>${esc(s.abschnitt ?? "")}</small></span>
       <span class="m">${link?.d != null ? `${de(link.d)} m` : "–"}</span>
-      <span class="s">${esc(s.richtungText ?? "")} · ${esc(s.id)}</span>`;
+      <span class="s">${esc(richtungsText(s))} · ${esc(s.id)}</span>`;
     li.append(b);
     return li;
   }));
@@ -1396,7 +1412,7 @@ function renderKarte() {
     : "";
   box.innerHTML = `
     <div><h3>${esc(s.name || s.id)}</h3>${s.abschnitt ? `<p class="sub">${esc(s.abschnitt)}</p>` : ""}</div>
-    <div class="meta">${kompassSvg(s.r.grad)}<span>${esc(s.richtungText ?? "")}</span></div>
+    <div class="meta">${kompassSvg(s.r.grad)}<span>${esc(richtungsText(s))}</span></div>
     <div class="meta"><span>${esc(s.id)}</span>·<span>${esc(q.name)}</span>·<span>${lizenz}</span>·<span>${s.gruppen.map((g) => esc(state.daten.gruppenNamen[g] ?? g)).join(", ")}</span></div>
     <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE[lage]})">${esc(LAGE_TEXT[lage])}${e?.link && state.wahl.get(s.id)?.id !== e.link.id ? " · von Hand" : ""}</span></div>
     ${gruende.length ? `<ul class="gruende">${gruende.map((g) => `<li>${esc(g)}</li>`).join("")}</ul>` : ""}
@@ -1404,7 +1420,7 @@ function renderKarte() {
     <div class="row">
       ${lage === "pruefen" || lage === "passt" ? '<button type="button" class="btn small" data-act="passt">Passt</button>' : ""}
       ${lage !== "aus" ? `<button type="button" class="btn secondary small${state.pick ? " on" : ""}" data-act="pick">${state.pick ? "Wählen abbrechen" : "Auf der Karte wählen"}</button>` : ""}
-      ${partner && link && linkVon(partner) ? `<button type="button" class="btn secondary small" data-act="tausch" title="mit ${esc(partner.richtungText ?? "")}">Mit Gegenrichtung tauschen</button>` : ""}
+      ${partner && link && linkVon(partner) ? `<button type="button" class="btn secondary small" data-act="tausch" title="mit ${esc(richtungsText(partner))}">Mit Gegenrichtung tauschen</button>` : ""}
       ${lage === "aus" ? '<button type="button" class="btn secondary small" data-act="ein">Wieder aufnehmen</button>' : '<button type="button" class="btn secondary small" data-act="aus">Auslassen</button>'}
       ${e?.link ? '<button type="button" class="linkbtn" data-act="reset">Zurück zur automatischen Wahl</button>' : ""}
     </div>
@@ -1601,9 +1617,10 @@ const stamm = () => {
 /** Die counts.xml aus den Zuordnungen und dem Mittel; dazu, was dabei draußen blieb. */
 function baueCounts() {
   const d = state.daten;
-  const locations = [];
   const quellen = new Map();
   const drausen = { ohneWerte: 0, unvollstaendig: 0, doppelterModus: 0, ohneStunden: 0 };
+  // erst je Stelle die Messungen, dann je Link eine Messstelle: MATSim erlaubt je Link nur eine
+  const jeLink = new Map();
   for (const s of genutzteStellen()) {
     const link = linkVon(s);
     const st = state.stunden.get(s.id);
@@ -1613,11 +1630,9 @@ function baueCounts() {
     }
     const r = state.ergebnisMittel.get(s.id) ?? {};
     const measurements = [];
-    const modi = new Set();
     const tage = [];
     for (const g of GRUPPEN) {
       if (!s.aktiv.includes(g) || !r[g]) continue;
-      const mode = state.gruppen[g].mode;
       const m = r[g];
       if (!m.werte.some((v) => v != null)) {
         drausen.ohneWerte++;
@@ -1627,37 +1642,66 @@ function baueCounts() {
         drausen.unvollstaendig++;
         continue;
       }
-      // MATSim führt Werte desselben Verkehrsmittels an einem Link zusammen; die erste Gruppe gilt
-      if (modi.has(mode)) {
-        drausen.doppelterModus++;
-        continue;
-      }
-      modi.add(mode);
-      measurements.push({ type: "volumes", networkMode: mode, interval: 3600, values: m.werte.flatMap((v, h) => (v == null ? [] : [[h * 3600, v]])) });
+      measurements.push({ type: "volumes", networkMode: state.gruppen[g].mode, interval: 3600, values: m.werte.flatMap((v, h) => (v == null ? [] : [[h * 3600, v]])) });
       tage.push([`tage_${g}`, m.tageGenutzt]);
     }
     if (!measurements.length) continue;
     const q = d.quellen.get(s.quelle);
-    quellen.set(q.code, q);
     const e = state.entscheid.get(s.id);
-    const erg = state.ergebnisse.get(s.id);
-    locations.push({
-      refId: link.id,
-      id: s.id,
-      name: s.name || s.id,
-      x: erg?.x,
-      y: erg?.y,
+    const eintrag = {
+      s,
+      q,
+      measurements,
       attributes: [
         ["quelle", q.code],
         ["lizenz", q.lizenzen.map((l) => l.lizenz).join(", ")],
         ["abschnitt", s.abschnitt],
-        ["richtung", s.richtungText],
-        ["abstand_m", link.d != null ? Math.round(link.d * 10) / 10 : null],
+        ["richtung", richtungsText(s)],
+        ["abstand_m", link.d != null ? Math.round(link.d * 10) / 10 : null, "java.lang.Double"],
         ["abweichung_grad", link.abweichung != null ? Math.round(link.abweichung) : null],
         ["zuordnung", e?.link ? "geprüft" : "automatisch"],
-        ...tage,
         ["kommentar", e?.kommentar],
       ],
+      tage,
+    };
+    if (!jeLink.has(link.id)) jeLink.set(link.id, []);
+    jeLink.get(link.id).push(eintrag);
+  }
+  const locations = [];
+  for (const [refId, eintraege] of jeLink) {
+    // MATSim führt Werte desselben Verkehrsmittels an einer Messstelle zusammen; die erste Gruppe gilt
+    const modi = new Set();
+    const measurements = [];
+    const attributes = [];
+    const genutzt = [];
+    for (const en of eintraege) {
+      const eigene = en.measurements.filter((m) => {
+        if (modi.has(m.networkMode)) {
+          drausen.doppelterModus++;
+          return false;
+        }
+        modi.add(m.networkMode);
+        return true;
+      });
+      if (!eigene.length) continue;
+      measurements.push(...eigene);
+      genutzt.push(en);
+      quellen.set(en.q.code, en.q);
+      // teilen sich Stellen einen Link, tragen ihre Angaben das Verkehrsmittel als Endung
+      const endung = eintraege.length > 1 ? `_${eigene[0].networkMode}` : "";
+      attributes.push(...en.attributes.map(([k, ...rest]) => [`${k}${endung}`, ...rest]), ...en.tage);
+    }
+    if (!genutzt.length) continue;
+    const erste = genutzt[0].s;
+    const erg = state.ergebnisse.get(erste.id);
+    if (genutzt.length > 1) attributes.unshift(["stellen", genutzt.map((en) => en.s.id).join(", ")]);
+    locations.push({
+      refId,
+      id: genutzt.map((en) => en.s.id).join("+"),
+      name: [...new Set(genutzt.map((en) => en.s.name || en.s.id))].join(" / "),
+      x: erg?.x,
+      y: erg?.y,
+      attributes,
       measurements,
     });
   }
@@ -1762,7 +1806,7 @@ $("zuordnung-csv").addEventListener("click", () => {
       kommentar: e?.kommentar ?? "",
       zuordnung: lage === "aus" ? "ausgelassen" : lage === "geprueft" ? "geprüft" : link ? "automatisch" : "ohne Link",
       abstand_m: link?.d != null ? Math.round(link.d * 10) / 10 : "",
-      richtung: s.richtungText ?? "",
+      richtung: richtungsText(s),
       name: s.name,
       quelle: s.quelle,
     };

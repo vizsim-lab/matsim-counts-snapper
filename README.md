@@ -21,7 +21,8 @@ Detektoren der Verkehrsinformationszentrale.
    counts.xml geht und welche Modi ihr Link erlauben muss. Vorgabe: Kfz als `car`, Rad als `bike`.
 3. **Prüfen:** Für jede Stelle sucht die Seite Links im Umkreis (Vorgabe 50 m), die das
    Verkehrsmittel erlauben und deren Richtung höchstens 60° von der Fahrtrichtung der Stelle
-   abweicht. Der nächste gewinnt; jeder Link geht nur an eine Stelle, das beste Paar zuerst.
+   abweicht. Der nächste gewinnt; jeder Link geht je Verkehrsmittel nur an eine Stelle, das beste
+   Paar zuerst. Eine Kfz- und eine Rad-Stelle dürfen sich also einen Link teilen.
    Ein passender Straßenname zählt wie 10 m weniger Abstand. Auf der Karte und in der Liste lässt
    sich jede Zuordnung bestätigen, durch einen anderen Link ersetzen oder auslassen.
 4. **Mitteln:** je Stunde über gewählte Wochentage, einen Zeitraum und, für Montag bis Freitag,
@@ -48,13 +49,21 @@ Entscheidungen merkt sich der Browser je Netz. Weitergeben und versionieren lass
 
 Die Seite liest `dauer/index.json` und, für die Stundenwerte, `dauer/{n}.json` aus
 `https://vizsim-lab.github.io/zaehlkarte/data/` (Version 5 dieser Dateien). Die Stundenwerte
-reichen dort je Quelle über die jüngsten 12 Monate.
+reichen dort je Quelle über ihre jüngsten 12 Monate, also je Quelle über einen anderen Zeitraum:
+bei den Berliner Detektoren etwa Juli 2024 bis Juni 2025, bei den Berliner Rad-Zählstellen das
+Jahr 2025 (die Quelle ergänzt einmal im Jahr). Ohne Angabe von „von“ und „bis“ nimmt die Seite für
+jede Stelle alle Tage, die sie hat; ein gemeinsamer Zeitraum lässt sich einstellen.
 
 Kurzzeitzählungen bleiben draußen: Die Zählkarte veröffentlicht sie als Summe über alle
 Richtungen, und eine MATSim-Messstelle hängt an genau einem gerichteten Link. Aus demselben Grund
 fehlen die meisten Rad-Zählstellen, die beide Richtungen zusammen zählen. Gerichtet sind etwa die
 Berliner Detektoren, die Dauerzählstellen in Baden-Württemberg und Bayern und ein Teil der
 Hamburger Stellen.
+
+Die Berliner Rad-Zählstellen nennen ihre Richtung nicht im Feld `richtung`, sondern im Namen
+(„Jannowitzbrücke Nord“) oder in der Kennung („01-MI-AL-W“). Berlin führt sie als
+Richtungszählstellen, je Fahrtrichtung eine; die Seite liest die Richtung darum für diese Quelle aus
+Name oder Kennung. So kommen 23 der 33 Stellen hinein; die übrigen zählen beide Richtungen.
 
 Die Zählkarte rechnet nichts um und füllt nichts auf; das gilt hier auch: Nicht gezählte Stunden
 bleiben leer, Tage mit doppelter Stunde 2–3 Uhr (Zeitumstellung) bleiben draußen, und es gibt
@@ -80,6 +89,11 @@ Ohne Werte in der Auswahl kommt eine Gruppe nicht hinein; ebenso ein Tagesgang o
 Stunden, solange „Nur ganze Tagesgänge“ gewählt ist (wie in MATSims BASt-Werkzeug). MATSim
 erlaubt je Link nur eine Messstelle und je Messstelle ein Verkehrsmittel nur einmal: Gehen zwei
 Gruppen einer Stelle auf denselben `networkMode`, kommt nur die erste hinein.
+
+Teilen sich eine Kfz- und eine Rad-Stelle einen Link, stehen beide in einer Messstelle:
+`id="berlin_rad:20-TS-MAR-N+berlin_viz:TE014"`, die Namen mit „ / “ verbunden, das Attribut
+`stellen` mit beiden Kennungen, und die Angaben jeder Stelle tragen ihr Verkehrsmittel als Endung
+(`quelle_bike`, `quelle_car`, `abstand_m_car`, …).
 
 ### Zuordnung als CSV
 
@@ -147,6 +161,7 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
 - Kurzzeitzählungen, sobald die Zählkarte Werte je Richtung und Knotenarm ausgibt
 - Stellen, die beide Richtungen zusammen zählen
 - Stundenwerte über ganze Jahre (die Zählkarte gibt für die Karte nur die jüngsten 12 Monate aus)
+- die Richtung der Berliner Rad-Zählstellen in der Zählkarte selbst führen (Feld `richtung`), statt sie hier aus dem Namen zu lesen
 - den Netz-Leser mit kachelwerk teilen statt ihn zu kopieren
 
 ## Lizenzen

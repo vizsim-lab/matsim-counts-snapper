@@ -173,13 +173,15 @@ function suche(job) {
   const ergebnisse = job.stellen.map((s) => {
     const [x, y] = netz.proj.vonWgs(s.lon, s.lat);
     const [mx, my] = netz.meter ? netz.meter.hin(x, y) : [x, y];
+    const umkreis = { links: 0, modus: 0 };
     const liste = Number.isFinite(mx) && Number.isFinite(my)
-      ? kandidaten(netz.index, { x: mx, y: my, grad: s.grad, name: s.name, modi: s.modi }, p)
+      ? kandidaten(netz.index, { x: mx, y: my, grad: s.grad, name: s.name, modi: s.modi }, p, umkreis)
       : [];
     return {
       id: s.id,
       x,
       y,
+      umkreis,
       kandidaten: liste.map((k) => ({ ...steckbrief(k.i), d: k.d, abweichung: k.abweichung, grad: k.grad, anteil: k.anteil, namePasst: k.name, score: k.score })),
     };
   });

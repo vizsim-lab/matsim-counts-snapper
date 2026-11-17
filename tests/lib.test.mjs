@@ -5,7 +5,7 @@ import { richtung, kompass, kurz, winkelAbstand } from "../lib/richtung.js";
 import { crsDefinition, projektion } from "../lib/crs.js";
 import { leseNetz, leseLinkGeometrien } from "../lib/netz.js";
 import { LinkIndex, kandidaten, verteile, naechsterPunkt, namePasst, erlaubt } from "../lib/zuordnung.js";
-import { leseIndex, tagArt, tagNr, isoTag, wochentag, leseStunden } from "../lib/zaehlkarte.js";
+import { leseIndex, tagArt, tagNr, isoTag, wochentag, leseStunden, richtungAusNamen } from "../lib/zaehlkarte.js";
 import { mittle, tagGilt, aggregatText, auswahlText, zeitraum, VORGABE } from "../lib/mitteln.js";
 import { countsXml, zuordnungCsv, leseZuordnungCsv, zahl } from "../lib/counts.js";
 
@@ -124,6 +124,11 @@ test("zuordnung: jeder Link nur einmal, Zuordnungen von Hand gehen vor", () => {
   assert.deepEqual(wahl.map((w) => w?.i), [1, 0, 3]);
   const vonHand = verteile(alle, new Map([[2, 0]]));
   assert.deepEqual(vonHand.map((w) => w?.i), [1, 2, undefined]);
+  // eine Kfz- und eine Rad-Stelle dürfen denselben Link haben, zwei Kfz-Stellen nicht
+  assert.deepEqual(verteile(alle, new Map(), [["car"], ["bike"], ["car"]]).map((w) => w?.i), [0, 0, 3]);
+  assert.deepEqual(verteile(alle, new Map(), [["car"], ["car", "truck"], ["bike"]]).map((w) => w?.i), [1, 0, 3]);
+  // Link 0 von Hand an Stelle 2 (car): die Rad-Stelle 1 teilt ihn, die Kfz-Stelle 0 weicht aus
+  assert.deepEqual(verteile(alle, new Map([[2, 0]]), [["car"], ["bike"], ["car"]]).map((w) => w?.i), [1, 0, undefined]);
 });
 
 test("zuordnung: lange Segmente ohne Zwischenpunkte", () => {
@@ -180,6 +185,31 @@ test("zaehlkarte: Index, Lizenzen, Kalender, Tage", () => {
   assert.throws(() => leseIndex({}), /keine dauer\/index.json/);
 });
 
+test("zaehlkarte: Berliner Rad-Zählstellen tragen die Richtung im Namen oder in der Kennung", () => {
+  const stelle = (id, quelle, name) => [id, quelle, name, null, null, 13.4, 52.5, "2020-01-01", "2025-12-31", 8, "11000000", 0];
+  const d = leseIndex({
+    ...INDEX,
+    quellen: [...INDEX.quellen, { code: "berlin_rad", land: "BE", lizenzen: [{ code: "berlin_rad", lizenz: "dl-de/zero-2-0" }] }, { code: "mobidata_rad", land: "BW", lizenzen: [{ code: "mobidata_rad", lizenz: "dl-de/by-2-0" }] }],
+    stellen: {
+      felder: INDEX.stellen.felder,
+      werte: [
+        stelle("berlin_rad:02-MI-JAN-N", "berlin_rad", "Jannowitzbrücke Nord"),
+        stelle("berlin_rad:03-MI-SAN-W", "berlin_rad", "Invalidenstraße West"),
+        stelle("berlin_rad:01-MI-AL-W", "berlin_rad", "Karl-Marx-Allee"),
+        stelle("berlin_rad:04-MI-NO", "berlin_rad", "Nordufer"),
+        stelle("berlin_rad:12-PA-SCH", "berlin_rad", "Schwedter Steg"),
+        stelle("mobidata_rad:100027946", "mobidata_rad", "Route Nord"),
+      ],
+    },
+  });
+  assert.deepEqual(d.stellen.map((s) => [s.r.art, s.r.grad]), [
+    ["gerichtet", 0], ["gerichtet", 270], ["gerichtet", 270], ["ohne", null], ["ohne", null], ["ohne", null],
+  ]);
+  assert.equal(d.stellen[0].r.ausNamen, true);
+  assert.equal(richtungAusNamen("Messe-Allee (Ost-West)", "1"), null);
+  assert.equal(richtungAusNamen("Mariendorfer Damm Süd", "20-TS-MAR-S"), 180);
+});
+
 test("mitteln: Tage wählen, Mittel, Median, Mindestzahl, Zeitumstellung", () => {
   const d = leseIndex(INDEX);
   const stelle = d.stellen[0];
@@ -225,7 +255,7 @@ test("counts: XML nach counts_v2 und Zuordnung als CSV", () => {
       name: "A115",
       x: 4581211.8905,
       y: 5811848.9,
-      attributes: [["richtung", "Richtung AK Zehlendorf (Südwest)"], ["abstand_m", 3.456]],
+      attributes: [["richtung", "Richtung AK Zehlendorf (Südwest)"], ["abstand_m", 3.456], ["gerundet", 5, "java.lang.Double"]],
       measurements: [{ type: "volumes", networkMode: "car", interval: 3600, values: [[0, 226.04], [3600, 144]] }],
     }],
   });
@@ -237,6 +267,7 @@ test("counts: XML nach counts_v2 und Zuordnung als CSV", () => {
   assert.doesNotMatch(x, /name="leer"/);
   assert.match(x, /<location refId="ab" id="berlin_viz:TE001" name="A115" x="4581211.89" y="5811848.9">/);
   assert.match(x, /<attribute name="abstand_m" class="java.lang.Double">3.46<\/attribute>/);
+  assert.match(x, /<attribute name="gerundet" class="java.lang.Double">5.0<\/attribute>/);
   assert.match(x, /<measurements type="volumes" networkMode="car" interval="3600">\n\t\t\t<value t="0" val="226.0"\/>\n\t\t\t<value t="3600" val="144.0"\/>/);
   assert.throws(() => countsXml({ year: 2025.5, locations: [] }), /Jahr/);
   assert.equal(zahl(1234.5678), "1234.6");
