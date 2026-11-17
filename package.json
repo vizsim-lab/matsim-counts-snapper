@@ -1,0 +1,9 @@
+{
+  "name": "matsim-counts-snapper",
+  "private": true,
+  "type": "module",
+  "description": "Zählstellen der Zählkarte auf MATSim-Links legen, mitteln und als counts.xml ausgeben",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}

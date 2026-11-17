@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MATSim Counts Snapper</title>
+<meta name="description" content="Legt Dauerzählstellen der Zählkarte auf die Links eines MATSim-Netzes, mittelt ihre Stundenwerte und schreibt eine counts.xml, komplett im Browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f2b705'/%3E%3Cpath d='M5 22 27 12' fill='none' stroke='%2317202c' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M12 9v8' fill='none' stroke='%2317202c' stroke-width='2' stroke-dasharray='2 2'/%3E%3Ccircle cx='12' cy='8' r='3.5' fill='%2317202c'/%3E%3C/svg%3E">
+<!-- Schriften und Bibliotheken liegen in vendor/: Beim Öffnen gehen keine Anfragen an Schrift- oder CDN-Dienste. -->
+<link rel="stylesheet" href="vendor/fonts/fonts.css">
+<link rel="stylesheet" href="vendor/maplibre-gl/maplibre-gl.css">
+<style>
+/* Layout und Formen wie in kachelwerk: links die Schritte, rechts die Karte. Das Schild ist hier gelb wie eine Bundesstraße. */
+:root {
+  --bg: #f2f4f7;
+  --surface: #ffffff;
+  --fg: #17202c;
+  --muted: #586373;
+  --line: #d5dbe3;
+  --accent: #1f4ea3;
+  --accent-ink: #ffffff;
+  --plate: #f2b705;
+  --plate-ink: #17202c;
+  --signal: #f2b705;
+  --danger: #b3261e;
+  --map-bg: #e8ecf0;
+  --st-passt: #2e7d32;
+  --st-pruefen: #d98c00;
+  --st-geprueft: #1f4ea3;
+  --st-ohne: #b3261e;
+  --st-aus: #8a94a3;
+  --font-display: "Barlow Semi Condensed", "Arial Narrow", "Roboto Condensed", sans-serif;
+  --font-body: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1520;
+    --surface: #161e2b;
+    --fg: #e4e9f0;
+    --muted: #97a2b3;
+    --line: #283446;
+    --accent: #7fa6ef;
+    --accent-ink: #0f1520;
+    --danger: #ff8a80;
+    --map-bg: #0b1119;
+    --st-passt: #5cc062;
+    --st-pruefen: #f2b705;
+    --st-geprueft: #7fa6ef;
+    --st-ohne: #ff6f61;
+    --st-aus: #6b7687;
+    color-scheme: dark;
+  }
+}
+
+html { height: 100%; box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
+body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 var(--font-body); }
+[hidden] { display: none !important; }
+code { font: 0.92em var(--font-mono); }
+
+.app { display: grid; grid-template-columns: minmax(340px, 430px) minmax(0, 1fr); height: 100%; }
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  padding-block: 20px 28px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: 18px;
+}
+.mapwrap { position: relative; min-width: 0; background: var(--map-bg); }
+#map { position: absolute; inset: 0; }
+
+.plate {
+  align-self: flex-start;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px 9px;
+  border-radius: 8px;
+  background: var(--plate);
+  color: var(--plate-ink);
+  box-shadow: inset 0 0 0 2px var(--plate), inset 0 0 0 3.5px var(--plate-ink);
+}
+.plate h1 { margin: 0; font: 700 25px/1 var(--font-display); letter-spacing: 0.01em; }
+.plate span { font: 500 12.5px/1.2 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.85; }
+.lede { margin: -8px 0 0; color: var(--muted); font-size: 14px; max-width: 36em; }
+
+.step { display: flex; flex-direction: column; gap: 10px; }
+.step h2 { display: flex; align-items: baseline; gap: 8px; margin: 0; font: 600 13px/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.step h2 b { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--muted); font-weight: 700; font-size: 12px; letter-spacing: 0; color: var(--fg); }
+.step.inactive > :not(h2) { opacity: 0.55; }
+
+.drop { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 14px; border: 1.5px dashed var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; transition: border-color 120ms; }
+.drop:hover, .drop.over { border-color: var(--accent); }
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.drop strong { font-weight: 600; }
+.drop small { color: var(--muted); font-size: 13px; }
+.drop input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.source { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 14px; min-width: 0; }
+.source .name { font-weight: 600; overflow-wrap: anywhere; }
+.chip { display: inline-block; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--line); font: 500 11.5px/1.5 var(--font-display); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.chip.example { border-color: var(--signal); color: var(--fg); }
+.chip.fit { border-color: var(--accent); color: var(--fg); }
+.linkbtn { padding: 0; border: 0; background: none; color: var(--accent); font: 600 13px/1.4 var(--font-display); letter-spacing: 0.03em; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 2px; cursor: pointer; }
+.linkbtn:hover { text-decoration-color: currentColor; }
+.linkbtn:disabled { color: var(--muted); text-decoration: none; cursor: default; opacity: 0.6; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.geo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; color: var(--muted); }
+.geo strong { color: var(--fg); font-weight: 600; overflow-wrap: anywhere; }
+
+/* VSP-SVN, wie in kachelwerk */
+.svn { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.svn > summary { padding: 10px 14px; cursor: pointer; font-weight: 600; font-size: 14.5px; }
+.svn > summary::marker { color: var(--muted); }
+.svn > summary small { margin-left: 6px; color: var(--muted); font-weight: 400; font-size: 13px; }
+.svn[open] > summary { border-bottom: 1px solid var(--line); }
+.svn-body { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 2px; font: 500 13px/1.5 var(--font-display); color: var(--muted); }
+.crumbs button { padding: 0 2px; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; overflow-wrap: anywhere; text-align: left; }
+.crumbs button:last-child { color: var(--fg); font-weight: 600; }
+.svn-list { list-style: none; margin: 0; padding: 0; max-height: 264px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+.svn-list li + li { border-top: 1px solid var(--line); }
+.svn-list button { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 6px 10px; border: 0; background: none; color: var(--fg); font: 13px/1.35 var(--font-mono); text-align: left; cursor: pointer; }
+.svn-list button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.svn-list .n { min-width: 0; overflow-wrap: anywhere; }
+.svn-list .dir .n { font-weight: 500; }
+.svn-list .chip { margin-left: auto; flex: none; }
+.svn-list .empty { padding: 6px 10px; color: var(--muted); font-size: 13px; }
+.svn-url { display: flex; gap: 8px; }
+.svn-url input { flex: 1; min-width: 0; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--fg); font: 13px/1.3 var(--font-mono); }
+
+.seg { display: inline-flex; flex-wrap: wrap; align-self: flex-start; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.seg button { padding: 6px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: 600 13.5px/1.2 var(--font-display); letter-spacing: 0.03em; cursor: pointer; }
+.seg button:hover { color: var(--fg); }
+.seg button[aria-checked="true"], .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button span { font-weight: 500; opacity: 0.8; margin-left: 3px; font-variant-numeric: tabular-nums; }
+
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field.wide { grid-column: 1 / -1; }
+.field label, .field .label { font: 600 12.5px/1.2 var(--font-display); letter-spacing: 0.04em; color: var(--muted); }
+.field input[type="text"], .field input[type="number"], .field input[type="date"], .field select, .field textarea {
+  width: 100%; min-width: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--fg); font: 14px/1.3 var(--font-mono);
+}
+.field textarea { resize: vertical; min-height: 2.4em; font-family: var(--font-body); }
+.field input:focus-visible, .field select:focus-visible, .field textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field small, .hint { color: var(--muted); font-size: 12.5px; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+.check input { margin-top: 3px; accent-color: var(--accent); }
+.field.check { flex-direction: row; align-items: flex-start; gap: 8px; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font: 600 15px/1 var(--font-display); letter-spacing: 0.03em; cursor: pointer; text-decoration: none; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn.secondary { background: transparent; color: var(--fg); box-shadow: inset 0 0 0 1.5px var(--line); }
+.btn.small { padding: 6px 11px; font-size: 14px; }
+.btn.on { box-shadow: inset 0 0 0 2px var(--signal); }
+.row { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+
+.status { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.status[data-state="error"] .text { color: var(--danger); }
+.bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--signal); transition: width 150ms linear; }
+.bar.indeterminate i { width: 35%; animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.note { margin: 0; color: var(--muted); font-size: 13px; }
+.note.warn { color: var(--fg); padding: 7px 10px; border-left: 3px solid var(--signal); background: color-mix(in srgb, var(--signal) 10%, transparent); border-radius: 0 6px 6px 0; }
+
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--line); }
+.stats div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: var(--surface); min-width: 0; }
+.stats dt { font: 600 11.5px/1.2 var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); }
+.stats dd { margin: 0; font: 500 16px/1.25 var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Gruppen und Verkehrsmittel */
+.gruppen { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.gruppen th { padding: 0 6px 4px 0; font: 600 11.5px/1.2 var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); text-align: left; }
+.gruppen td { padding: 3px 6px 3px 0; border-top: 1px solid var(--line); vertical-align: middle; }
+.gruppen input[type="text"] { width: 6.5em; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); font: 13px/1.3 var(--font-mono); }
+.gruppen .n { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+.gruppen tr.off td:not(:first-child) { opacity: 0.5; }
+
+/* Liste der Stellen */
+.liste { list-style: none; margin: 0; padding: 0; max-height: 300px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.liste li + li { border-top: 1px solid var(--line); }
+.liste button { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: baseline; gap: 2px 8px; width: 100%; padding: 6px 10px; border: 0; background: none; color: var(--fg); text-align: left; cursor: pointer; font: 14px/1.3 var(--font-body); }
+.liste button:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.liste button[aria-current="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.liste .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); align-self: center; }
+.liste .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.liste .t small { font-weight: 400; color: var(--muted); }
+.liste .m { font: 12.5px/1.3 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.liste .s { grid-column: 2 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12.5px; }
+.liste .empty { padding: 8px 10px; color: var(--muted); font-size: 13px; }
+
+/* Karte einer Stelle */
+.karte { display: flex; flex-direction: column; gap: 10px; padding: 12px 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.karte h3 { margin: 0; font: 700 19px/1.15 var(--font-display); letter-spacing: 0.01em; }
+.karte .sub { margin: -6px 0 0; color: var(--muted); font-size: 13.5px; }
+.karte .meta { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.karte .meta a { color: inherit; }
+.kompass { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line); vertical-align: middle; }
+.kompass svg { width: 14px; height: 14px; }
+.lage { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 7px; border-radius: 99px; font: 600 12.5px/1.5 var(--font-display); letter-spacing: 0.04em; color: var(--fg); background: color-mix(in srgb, var(--c) 18%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 55%, transparent); }
+.lage::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.gruende { margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.linkinfo { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 12px; margin: 0; font-size: 13px; }
+.linkinfo dt { font: 600 12px/1.45 var(--font-display); letter-spacing: 0.03em; color: var(--muted); }
+.linkinfo dd { margin: 0; font: 12.5px/1.45 var(--font-mono); overflow-wrap: anywhere; }
+.kand { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.kand th { padding: 0 6px 3px 0; font: 600 11px/1.2 var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); text-align: left; }
+.kand td { padding: 3px 6px 3px 0; border-top: 1px solid var(--line); font-family: var(--font-mono); font-variant-numeric: tabular-nums; vertical-align: baseline; }
+.kand td.x { font-family: var(--font-body); max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.kand tr.cur td { font-weight: 600; }
+.kand .rang { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--fg); color: var(--surface); font: 600 11px/1 var(--font-display); }
+.profil { display: block; width: 100%; height: auto; }
+.profil text { font: 10px var(--font-mono); fill: var(--muted); }
+.legende-profil { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 12.5px; color: var(--muted); }
+.legende-profil i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border-radius: 2px; background: var(--c); vertical-align: -1px; }
+
+/* Wochentage */
+.tage { display: flex; flex-wrap: wrap; gap: 4px; }
+.tage button { min-width: 38px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--fg); font: 600 13.5px/1.2 var(--font-display); cursor: pointer; }
+.tage button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+
+.quellen { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.quellen li { padding-left: 10px; border-left: 2px solid var(--line); }
+.quellen li.einschr { border-left-color: var(--signal); }
+.quellen b { font-weight: 600; }
+.quellen .v { color: var(--muted); }
+
+.credit { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.credit a, .foot a, .quellen a { color: inherit; text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 2px; }
+.foot { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.foot p { margin: 0 0 4px; }
+
+/* Karte */
+.basemap { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: max(10px, env(safe-area-inset-left, 0px)); display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: 0 1px 4px rgb(0 0 0 / 0.12); }
+.basemap button { padding: 5px 10px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: 600 12.5px/1.2 var(--font-display); letter-spacing: 0.03em; cursor: pointer; }
+.basemap button:hover { color: var(--fg); }
+.basemap button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.basemap-err { padding: 0 8px 0 4px; color: var(--danger); font: 500 12px/1.2 var(--font-display); }
+.legend { position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 4px; padding: 8px 11px 8px; border-radius: 9px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); font-size: 12.5px; }
+.legend .title { font: 600 13px/1.2 var(--font-display); letter-spacing: 0.03em; }
+.legend .lg { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.legend .lg i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
+.legend .lg .ln { width: 18px; height: 0; border-radius: 0; border-top: 3px solid var(--c); background: none; }
+.legend .lg .ln.dash { border-top-style: dashed; }
+.busy, .pickhint { position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); max-width: calc(100% - 140px); padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); font: 500 13px/1.3 var(--font-display); letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pickhint { top: auto; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); border-color: var(--signal); box-shadow: 0 2px 10px rgb(0 0 0 / 0.15); }
+.mapwrap.pick .maplibregl-canvas { cursor: crosshair; }
+.maplibregl-popup-content { background: var(--surface); color: var(--fg); border-radius: 8px; padding: 9px 11px; font: 12.5px/1.45 var(--font-body); box-shadow: 0 4px 18px rgb(0 0 0 / 0.18); }
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip { border-top-color: var(--surface); }
+.maplibregl-popup-anchor-top .maplibregl-popup-tip { border-bottom-color: var(--surface); }
+.maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--surface); }
+.maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--surface); }
+.maplibregl-popup-close-button { color: var(--muted); font-size: 18px; padding: 0 6px; }
+.maplibregl-ctrl-bottom-right { max-width: calc(100% - 200px); }
+.linkwahl { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+.linkwahl-eintrag { display: flex; flex-direction: column; gap: 4px; }
+.linkwahl-eintrag + .linkwahl-eintrag { padding-top: 8px; border-top: 1px solid var(--line); }
+.linkwahl-eintrag strong { display: flex; align-items: center; gap: 6px; font: 600 14px/1.3 var(--font-display); }
+.linkwahl-eintrag .btn { align-self: flex-start; }
+
+@media (max-width: 860px) {
+  html, body { height: auto; }
+  .app { display: flex; flex-direction: column; height: auto; }
+  .mapwrap { order: -1; height: 50vh; height: 50svh; min-height: 280px; position: sticky; top: 0; z-index: 2; }
+  .panel { overflow: visible; border-right: 0; padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+}
+@media (max-width: 640px) {
+  .maplibregl-ctrl-bottom-right { max-width: 100%; }
+  /* die Legende als eine Zeile unten links, damit sie wenig Karte verdeckt */
+  .legend { flex-direction: row; flex-wrap: wrap; gap: 3px 10px; max-width: calc(100% - 120px); padding: 5px 8px; font-size: 11.5px; }
+  .legend .title { display: none; }
+  .busy { top: calc(128px + env(safe-area-inset-top, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar.indeterminate i { animation: none; width: 100%; opacity: 0.5; }
+  .bar i, .drop { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <div class="plate"><h1>MATSim Counts Snapper</h1><span>Zählkarte · Links · counts.xml</span></div>
+    <p class="lede">Legt Dauerzählstellen der <a href="https://vizsim-lab.github.io/zaehlkarte/" target="_blank" rel="noopener">Zählkarte</a> auf die Links eines MATSim-Netzes, mittelt ihre Stundenwerte und schreibt eine <code>counts.xml</code>. Alles läuft im Browser; eigene Dateien verlassen das Gerät nicht.</p>
+
+    <div class="status" id="status" data-state="idle" aria-live="polite">
+      <span class="text" id="status-text">Wartet auf ein Netz.</span>
+      <div class="bar" id="bar" hidden><i></i></div>
+    </div>
+
+    <section class="step" aria-labelledby="h-netz">
+      <h2 id="h-netz"><b>1</b>Netz</h2>
+      <label class="drop" id="drop" for="file">
+        <strong>Netz wählen oder hierher ziehen</strong>
+        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>). Mit Geometrien passen die Abstände besser.</small>
+        <input type="file" id="file" multiple accept=".xml,.gz,.csv,application/gzip,application/xml,text/xml,text/csv">
+      </label>
+      <details class="svn" id="svn">
+        <summary>Aus dem VSP-SVN laden <small>public-svn, countries/de</small></summary>
+        <div class="svn-body">
+          <nav class="crumbs" id="svn-crumbs" aria-label="Ordner im SVN"></nav>
+          <ul class="svn-list" id="svn-list"></ul>
+          <p class="note" id="svn-note" hidden></p>
+          <form class="svn-url" id="svn-url-form">
+            <input type="text" id="svn-url" placeholder="Pfad oder Adresse" spellcheck="false" autocomplete="off" aria-label="Pfad im SVN oder Adresse einer Datei oder eines Ordners">
+            <button class="btn secondary small" type="submit">Öffnen</button>
+          </form>
+        </div>
+      </details>
+      <div class="source" id="source"><span class="note">Noch kein Netz geladen.</span></div>
+      <div class="geo" id="geo" hidden>
+        <span id="geo-text"></span>
+        <label class="linkbtn">Geometrien wählen<input type="file" id="geo-file" class="visually-hidden" accept=".csv,.gz,text/csv,application/gzip"></label>
+        <button type="button" class="linkbtn" id="geo-clear" hidden>ohne Geometrien</button>
+      </div>
+      <div class="fields">
+        <div class="field">
+          <label for="crs">Koordinatensystem</label>
+          <input type="text" id="crs" value="EPSG:25832" spellcheck="false" autocomplete="off" list="crs-list">
+          <datalist id="crs-list">
+            <option value="EPSG:25832">ETRS89 / UTM 32N</option>
+            <option value="EPSG:25833">ETRS89 / UTM 33N</option>
+            <option value="EPSG:31468">DHDN / Gauß-Krüger 4</option>
+            <option value="EPSG:31467">DHDN / Gauß-Krüger 3</option>
+            <option value="EPSG:32632">WGS 84 / UTM 32N</option>
+            <option value="EPSG:32633">WGS 84 / UTM 33N</option>
+            <option value="EPSG:4326">WGS 84</option>
+          </datalist>
+        </div>
+        <div class="field">
+          <span class="label">Beispiel</span>
+          <button type="button" class="btn secondary small" id="beispiel">Berlin laden</button>
+        </div>
+        <div class="field wide"><small>Das Koordinatensystem gilt, wenn das Netz keins nennt (Attribut <code>coordinateReferenceSystem</code>). Auch proj4-Definitionen gehen, etwa von epsg.io.</small></div>
+      </div>
+      <p class="credit" id="credit" hidden></p>
+    </section>
+
+    <section class="step inactive" id="s-stellen" aria-labelledby="h-stellen">
+      <h2 id="h-stellen"><b>2</b>Zählstellen</h2>
+      <p class="note" id="daten-text">Die Dauerzählstellen der Zählkarte werden geladen …</p>
+      <dl class="stats" id="auswahl-stats" hidden>
+        <div><dt>Im Netzgebiet</dt><dd id="st-gebiet">–</dd></div>
+        <div><dt>Dabei</dt><dd id="st-gerichtet">–</dd></div>
+        <div><dt>Mit Link</dt><dd id="st-link">–</dd></div>
+      </dl>
+      <p class="note" id="auswahl-text" hidden></p>
+      <table class="gruppen" id="gruppen">
+        <caption class="visually-hidden">Gruppen der Zählkarte, ihr Verkehrsmittel in der counts.xml und welche Links sie nutzen dürfen</caption>
+        <thead><tr><th scope="col">Gruppe</th><th scope="col">networkMode</th><th scope="col">Link erlaubt</th><th scope="col" class="n">Stellen</th></tr></thead>
+        <tbody id="gruppen-body"></tbody>
+      </table>
+      <p class="hint">Kfz enthält Lkw und Schwerverkehr. Wer Lkw als eigenes Verkehrsmittel simuliert, zählt sie sonst doppelt. „Link erlaubt“: Modi, von denen der Link mindestens einen haben muss.</p>
+      <div class="fields">
+        <div class="field">
+          <label for="radius">Umkreis (m)</label>
+          <input type="number" id="radius" min="5" max="500" step="5" value="50">
+        </div>
+        <div class="field">
+          <label for="winkel">Richtung, höchstens ± Grad</label>
+          <input type="number" id="winkel" min="10" max="180" step="5" value="60">
+        </div>
+        <label class="check field wide" for="ohne-kompass">
+          <input type="checkbox" id="ohne-kompass" checked>
+          <span>Stellen, die nur ein Ziel nennen („Richtung Lindau“), mitnehmen und zum Prüfen markieren</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="step inactive" id="s-pruefen" aria-labelledby="h-pruefen">
+      <h2 id="h-pruefen"><b>3</b>Prüfen</h2>
+      <div class="seg" id="filter" role="radiogroup" aria-label="Welche Stellen die Liste zeigt"></div>
+      <ul class="liste" id="liste" aria-label="Zählstellen"></ul>
+      <div class="row">
+        <button type="button" class="linkbtn" id="naechste">Nächste zum Prüfen</button>
+        <span class="note" id="tasten">Tasten: <kbd>n</kbd> nächste, <kbd>p</kbd> passt, <kbd>w</kbd> auf der Karte wählen, <kbd>a</kbd> auslassen</span>
+      </div>
+      <div class="karte" id="karte" hidden></div>
+    </section>
+
+    <section class="step inactive" id="s-mitteln" aria-labelledby="h-mitteln">
+      <h2 id="h-mitteln"><b>4</b>Mitteln</h2>
+      <div class="field">
+        <span class="label">Wochentage</span>
+        <div class="tage" id="wochentage" role="group" aria-label="Wochentage"></div>
+      </div>
+      <div class="fields">
+        <div class="field">
+          <label for="von">von</label>
+          <input type="date" id="von">
+        </div>
+        <div class="field">
+          <label for="bis">bis</label>
+          <input type="date" id="bis">
+        </div>
+        <div class="field wide">
+          <span class="label">Montag bis Freitag nur an</span>
+          <div class="row">
+            <label class="check"><input type="checkbox" class="tagesart" value="s" checked>Schultagen</label>
+            <label class="check"><input type="checkbox" class="tagesart" value="f">Ferientagen</label>
+            <label class="check"><input type="checkbox" class="tagesart" value="h">Feiertagen</label>
+            <label class="check"><input type="checkbox" class="tagesart" value="u">Tagen ohne Kalender</label>
+          </div>
+        </div>
+        <div class="field">
+          <span class="label">Je Stunde</span>
+          <div class="seg" id="statistik" role="radiogroup" aria-label="Statistik je Stunde">
+            <button type="button" role="radio" value="mittel" aria-checked="true">Mittel</button>
+            <button type="button" role="radio" value="median" aria-checked="false">Median</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="min-tage">Mindestens Tage je Stunde</label>
+          <input type="number" id="min-tage" min="1" max="366" step="1" value="5">
+        </div>
+        <label class="check field wide" for="vollstaendig">
+          <input type="checkbox" id="vollstaendig" checked>
+          <span>Nur ganze Tagesgänge, alle 24 Stunden (wie MATSims BASt-Werkzeug)</span>
+        </label>
+      </div>
+      <p class="note" id="zeitraum-text"></p>
+      <div class="row" id="laden-row">
+        <button type="button" class="btn secondary small" id="stunden-laden">Stundenwerte laden</button>
+        <span class="note" id="stunden-text"></span>
+      </div>
+      <p class="note" id="mittel-text" hidden></p>
+    </section>
+
+    <section class="step inactive" id="s-ausgeben" aria-labelledby="h-ausgeben">
+      <h2 id="h-ausgeben"><b>5</b>Ausgeben</h2>
+      <div class="fields">
+        <div class="field wide">
+          <label for="counts-name">Name</label>
+          <input type="text" id="counts-name" value="" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="jahr">Jahr</label>
+          <input type="number" id="jahr" min="1990" max="2100" step="1">
+        </div>
+        <label class="check field" for="nur-geprueft" style="align-self: end">
+          <input type="checkbox" id="nur-geprueft">
+          <span>nur geprüfte Stellen</span>
+        </label>
+      </div>
+      <div class="row">
+        <button type="button" class="btn" id="counts-xml" disabled>counts.xml</button>
+        <button type="button" class="btn secondary" id="counts-gz" disabled>.xml.gz</button>
+        <button type="button" class="btn secondary" id="zuordnung-csv" disabled>Zuordnung (CSV)</button>
+      </div>
+      <p class="note">Die Zuordnung ist eine CSV im Format von MATSims <code>--counts-mapping</code>: Station, <code>linkid</code>, <code>using</code>, Kommentar, dazu wie der Link zustande kam. Wieder eingelesen stellt sie die geprüften Links und die ausgelassenen Stellen her; die übrigen sucht die Seite neu.
+        <label class="linkbtn">Zuordnung laden<input type="file" id="csv-file" class="visually-hidden" accept=".csv,text/csv"></label></p>
+      <p class="note" id="export-text" hidden></p>
+      <div class="field" id="quellen-box" hidden>
+        <span class="label">Quellen und Lizenzen in der Ausgabe</span>
+        <ul class="quellen" id="quellen"></ul>
+        <small>Die Bedingungen der Lizenzen gelten auch für die counts.xml. Quellen ohne Lizenz nimmt die Seite nie auf.</small>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <p>Daten: <a href="https://github.com/vizsim-lab/zaehlkarte" target="_blank" rel="noopener">Zählkarte</a> (Dauerzählstellen). Netz lesen wie in <a href="https://github.com/vizsim-lab/kachelwerk" target="_blank" rel="noopener">kachelwerk</a>, Karte mit <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre GL JS</a> und <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a>, Umrechnung mit <a href="https://github.com/proj4js/proj4js" target="_blank" rel="noopener">proj4js</a>.</p>
+      <p><a href="https://github.com/vizsim-lab/matsim-counts-snapper" target="_blank" rel="noopener">Quellcode</a> und <a href="https://github.com/vizsim-lab/matsim-counts-snapper/blob/main/THIRD_PARTY_LICENSES.md" target="_blank" rel="noopener">Lizenzen</a> auf GitHub.</p>
+    </footer>
+  </aside>
+
+  <main class="mapwrap" id="mapwrap">
+    <div id="map" role="region" aria-label="Karte mit Netz und Zählstellen"></div>
+    <div class="basemap" id="basemap" role="group" aria-label="Hintergrundkarte (OpenFreeMap)">
+      <button type="button" value="positron" aria-pressed="false">Positron</button>
+      <button type="button" value="dark" aria-pressed="false">Dark</button>
+      <button type="button" value="none" aria-pressed="false">Ohne</button>
+      <span class="basemap-err" id="basemap-error" hidden></span>
+    </div>
+    <div class="busy" id="busy" hidden></div>
+    <div class="pickhint" id="pickhint" hidden>Klicke den Link, auf dem die Stelle zählt. <kbd>Esc</kbd> bricht ab.</div>
+    <div class="legend" id="legend" hidden>
+      <span class="title">Zählstellen</span>
+      <span class="lg"><i style="--c: var(--st-passt)"></i>passt</span>
+      <span class="lg"><i style="--c: var(--st-pruefen)"></i>prüfen</span>
+      <span class="lg"><i style="--c: var(--st-geprueft)"></i>geprüft</span>
+      <span class="lg"><i style="--c: var(--st-ohne)"></i>ohne Link</span>
+      <span class="lg"><i style="--c: var(--st-aus)"></i>ausgelassen</span>
+      <span class="lg"><i class="ln dash" style="--c: var(--fg)"></i>Kandidaten</span>
+    </div>
+  </main>
+</div>
+
+<script src="vendor/maplibre-gl/maplibre-gl.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
