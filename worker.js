@@ -1,15 +1,19 @@
 // Worker: liest das Netz, hält es im Speicher und sucht für Zählstellen die passenden Links.
-// Die Seite bekommt das Netz als GeoJSON in WGS84 für die Karte, Kandidaten mit ihrer Geometrie
-// und auf Nachfrage einzelne Links.
+// Ein Netz ist ein MATSim-Netz (network.xml) oder ein OSM-Auszug (.osm.pbf, lib/osm.js), dessen
+// Wege als gerichtete Kanten wie Links gelten. Die Seite bekommt das Netz als GeoJSON in WGS84 für
+// die Karte, Kandidaten mit ihrer Geometrie, auf Nachfrage einzelne Links und die Übernahme einer
+// Zuordnung von einem anderen Netz (lib/uebertrag.js).
 import { leseNetz, leseLinkGeometrien, istPtLink } from "./lib/netz.js";
+import { istPbf, leseOsm } from "./lib/osm.js";
 import { projektion } from "./lib/crs.js";
 import { LinkIndex, kandidaten, modiVon, naechsterPunkt, VORGABE } from "./lib/zuordnung.js";
+import { siehtNachSumoAus, uebertrage, wegeVonLink } from "./lib/uebertrag.js";
 import { winkelAbstand } from "./lib/richtung.js";
 
 const status = (text) => postMessage({ type: "status", text });
 const de = (n) => n.toLocaleString("de-DE");
 
-let netz = null; // { links, proj, metrisch (Links in Metern), index, name }
+let netz = null; // { links, proj, metrisch (Links in Metern), index, ids (Link-ID -> Index), name }
 
 /** Für ein Netz in Grad: Meter um die Mitte, genähert (gleichabständig). */
 function meterUm(lon0, lat0) {
@@ -49,8 +53,29 @@ function steckbrief(i) {
     capacity: Number.isFinite(l.capacity) ? l.capacity : null,
     permlanes: Number.isFinite(l.permlanes) ? l.permlanes : null,
     length: Number.isFinite(l.length) ? l.length : null,
+    weg: l.weg ?? null,
+    osm: Boolean(l.osm),
     geom: wgs(l),
   };
+}
+
+/** Index eines Links nach seiner ID, über eine Tabelle, die beim ersten Mal entsteht. */
+function indexVon(id) {
+  netz.ids ??= new Map(netz.links.map((l, i) => [l.id, i]));
+  return netz.ids.get(id);
+}
+
+/** Lage und Richtung einer Stelle in Metern, wie der Index rechnet. */
+function inMetern(lon, lat) {
+  const [x, y] = netz.proj.vonWgs(lon, lat);
+  return netz.meter ? netz.meter.hin(x, y) : [x, y];
+}
+
+/** Abstand, Richtung und Abweichung eines Links zu einer Stelle { lon, lat, grad }. */
+function bezug(i, s) {
+  const [mx, my] = inMetern(s.lon, s.lat);
+  const n = naechsterPunkt(mx, my, netz.metrisch[i].xy);
+  return { d: n.d, grad: n.grad, anteil: n.anteil, abweichung: s.grad != null && n.grad != null ? winkelAbstand(s.grad, n.grad) : null };
 }
 
 /** Das Netz als GeoJSON in WGS84, ohne pt-Links, in Stücken kodiert; dazu seine Ausdehnung. */
@@ -115,9 +140,26 @@ async function ladeNetz(job) {
     geometries = g.map;
     geoInfo = { rows: g.rows, invalid: g.invalid };
   }
-  status("MATSim-Netz lesen …");
-  const r = await leseNetz(job.bytes, geometries, status);
-  const crsName = r.crs ?? job.crs;
+  const osm = istPbf(job.bytes);
+  let r;
+  if (osm) {
+    status("OSM-Auszug lesen …");
+    r = await leseOsm(job.bytes, { filter: job.osmFilter, status });
+  } else {
+    status("MATSim-Netz lesen …");
+    r = await leseNetz(job.bytes, geometries, status);
+    // OSM-Wege der Links, wenn das Netz sie verrät: für die Übernahme einer Zuordnung aus OSM
+    const sumo = siehtNachSumoAus(r.links);
+    let mitWeg = 0;
+    for (const l of r.links) {
+      const w = wegeVonLink(l, sumo);
+      l.weg = w.weg;
+      l.wege = w.wege;
+      if (w.wege.length) mitWeg++;
+    }
+    r.wegeInfo = { sumo, links: mitWeg };
+  }
+  const crsName = osm ? "EPSG:4326" : r.crs ?? job.crs;
   let proj;
   try {
     proj = projektion(crsName);
@@ -136,7 +178,7 @@ async function ladeNetz(job) {
       return { ...l, xy };
     });
   }
-  netz = { links: r.links, metrisch, meter, proj, index: null, name: job.name };
+  netz = { links: r.links, metrisch, meter, proj, index: null, ids: null, name: job.name };
   const modi = {};
   for (const l of r.links) for (const m of modiVon(l)) modi[m] = (modi[m] ?? 0) + 1;
   postMessage(
@@ -149,6 +191,8 @@ async function ladeNetz(job) {
         crs: proj.code,
         crsName: proj.name,
         crsAusDatei: Boolean(r.crs),
+        osm: r.osm ?? null,
+        wege: r.wegeInfo ?? null,
         stats: r.stats,
         geometrien: geoInfo,
         modi,
@@ -162,13 +206,18 @@ async function ladeNetz(job) {
   );
 }
 
+function raster(radius) {
+  if (!netz.index || netz.index.zelle !== Math.max(50, radius)) {
+    status("Links in ein Raster legen …");
+    netz.index = new LinkIndex(netz.metrisch, Math.max(50, radius));
+  }
+  return netz.index;
+}
+
 function suche(job) {
   if (!netz) throw new Error("Es ist noch kein Netz geladen.");
   const p = { ...VORGABE, ...job.params };
-  if (!netz.index || netz.index.zelle !== Math.max(50, p.radius)) {
-    status("Links in ein Raster legen …");
-    netz.index = new LinkIndex(netz.metrisch, Math.max(50, p.radius));
-  }
+  raster(p.radius);
   status("Links zu den Zählstellen suchen …");
   const ergebnisse = job.stellen.map((s) => {
     const [x, y] = netz.proj.vonWgs(s.lon, s.lat);
@@ -191,20 +240,33 @@ function suche(job) {
 /** Ein Link für die Seite, mit Abstand und Richtung zu einer Stelle, wenn sie dabei ist. */
 function link(job) {
   if (!netz) return;
-  const i = job.i ?? netz.links.findIndex((l) => l.id === job.id);
+  const i = job.i ?? indexVon(job.id);
   if (!(i >= 0 && i < netz.links.length)) {
     postMessage({ type: "link", token: job.token, link: null, id: job.id });
     return;
   }
   const out = steckbrief(i);
-  if (job.stelle) {
-    const s = job.stelle;
-    const [x, y] = netz.proj.vonWgs(s.lon, s.lat);
-    const [mx, my] = netz.meter ? netz.meter.hin(x, y) : [x, y];
-    const n = naechsterPunkt(mx, my, netz.metrisch[i].xy);
-    Object.assign(out, { d: n.d, grad: n.grad, anteil: n.anteil, abweichung: s.grad != null && n.grad != null ? winkelAbstand(s.grad, n.grad) : null });
-  }
+  if (job.stelle) Object.assign(out, bezug(i, job.stelle));
   postMessage({ type: "link", token: job.token, link: out });
+}
+
+/**
+ * Zuordnungen von einem anderen Netz übernehmen: je Anker { id, lon, lat, grad, linkId, weg, modi,
+ * stelle } der Link, der eindeutig passt, sonst der Grund (lib/uebertrag.js).
+ */
+function uebernimm(job) {
+  if (!netz) throw new Error("Es ist noch kein Netz geladen.");
+  const index = raster(VORGABE.radius);
+  netz.ids ??= new Map(netz.links.map((l, i) => [l.id, i]));
+  status(`${job.anker.length.toLocaleString("de-DE")} Zuordnungen übernehmen …`);
+  const ergebnisse = job.anker.map((a) => {
+    const [x, y] = inMetern(a.lon, a.lat);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return { id: a.id, link: null, wie: null, grund: "der Anker liegt außerhalb des Koordinatensystems" };
+    const r = uebertrage(index, { x, y, grad: a.grad, linkId: a.linkId, weg: a.weg, modi: a.modi }, undefined, netz.ids);
+    if (r.i == null) return { id: a.id, link: null, wie: null, grund: r.grund };
+    return { id: a.id, wie: r.wie, link: { ...steckbrief(r.i), ...bezug(r.i, a.stelle) }, ankerAbstand: r.d };
+  });
+  postMessage({ type: "uebertrage", token: job.token, ergebnisse });
 }
 
 onmessage = async (e) => {
@@ -213,6 +275,7 @@ onmessage = async (e) => {
     if (job.type === "netz") await ladeNetz(job);
     else if (job.type === "suche") suche(job);
     else if (job.type === "link") link(job);
+    else if (job.type === "uebertrage") uebernimm(job);
   } catch (err) {
     postMessage({ type: "error", job: job.type, token: job.token, message: err?.message ?? String(err) });
   }

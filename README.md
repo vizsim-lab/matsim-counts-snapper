@@ -2,8 +2,10 @@
 
 Statische Seite, die Dauerzählstellen der [Zählkarte](https://github.com/vizsim-lab/zaehlkarte)
 auf die Links eines MATSim-Netzes legt, ihre Stundenwerte über gewählte Tage mittelt und eine
-`counts.xml` im Format `counts_v2` schreibt. Alles läuft im Browser; ein Server ist nicht nötig,
-und eigene Dateien verlassen den Rechner nicht.
+`counts.xml` im Format `counts_v2` schreibt. Geprüft werden kann auch auf einem OSM-Auszug
+(`.osm.pbf`): Die Zuordnung trägt dann einen Anker, der sich auf jede Version eines MATSim-Netzes
+übertragen lässt, statt nach jeder Überarbeitung des Netzes neu zu prüfen. Alles läuft im Browser;
+ein Server ist nicht nötig, und eigene Dateien verlassen den Rechner nicht.
 
 Ohne Angabe lädt die Seite ein Beispiel: das alte Berliner Netz aus matsim-libs und die Berliner
 Detektoren der Verkehrsinformationszentrale.
@@ -14,7 +16,8 @@ Detektoren der Verkehrsinformationszentrale.
    Link-Geometrien (`…-linkGeometries.csv`, wie MATSims SUMO-Konverter sie schreibt) oder dem
    Attribut `origgeom`. Gelesen wird wie in [kachelwerk](https://github.com/vizsim-lab/kachelwerk);
    Links ohne `modes` gelten wie in MATSim als `car`, pt-Links bleiben aus der Karte. Das CRS kommt
-   aus dem Netz-Attribut `coordinateReferenceSystem`, sonst aus dem Formular.
+   aus dem Netz-Attribut `coordinateReferenceSystem`, sonst aus dem Formular. Oder ein OSM-Auszug
+   (`.osm.pbf`), siehe [unten](#osm-auszug-und-übernahme-auf-ein-anderes-netz).
 2. **Zählstellen:** die Dauerzählstellen der Zählkarte im Gebiet des Netzes, die eine Richtung
    zählen und aus einer Quelle mit Lizenz stammen. Je Gruppe der Zählkarte (`kfz`, `lkw`, `sv`,
    `rad`, `fuss`) lässt sich wählen, ob sie mitkommt, unter welchem `networkMode` sie in die
@@ -29,7 +32,8 @@ Detektoren der Verkehrsinformationszentrale.
    Schultage, Ferien- oder Feiertage nach dem Ferienkalender der Zählkarte; als Mittel oder Median,
    mit einer Mindestzahl an Tagen je Stunde. Vorgabe wie MATSims `CreateCountsFromBAStData`:
    Dienstag bis Donnerstag, Mittel, dazu nur Schultage und mindestens 5 Tage.
-5. **Ausgeben:** `counts.xml` oder `.xml.gz`, dazu die Zuordnung als CSV.
+5. **Ausgeben:** `counts.xml` oder `.xml.gz`, dazu die Zuordnung als CSV (bei einem OSM-Auszug
+   nur sie).
 
 ### Welche Stellen zum Prüfen markiert sind
 
@@ -43,7 +47,66 @@ Tasten: `n` nächste Stelle zum Prüfen, `p` passt, `w` Link auf der Karte wähl
 Rückrichtung), fragt die Seite, welcher gemeint ist. Ab Zoom 14 liegen die beiden Richtungen
 nebeneinander, jede auf ihrer rechten Seite.
 
-Entscheidungen merkt sich der Browser je Netz. Weitergeben und versionieren lassen sie sich als CSV.
+Entscheidungen merkt sich der Browser je Netz. Weitergeben, versionieren und auf ein anderes Netz
+übertragen lassen sie sich als CSV.
+
+## OSM-Auszug und Übernahme auf ein anderes Netz
+
+Wird ein MATSim-Netz überarbeitet, ändern sich Link-IDs, und die geprüfte Zuordnung wäre neu zu
+machen. Darum lässt sie sich einmal auf OSM prüfen (oder auf einer Netzversion) und dann auf jede
+neue Version übertragen.
+
+**OSM lesen.** Die Seite liest `.osm.pbf` selbst, ohne Bibliothek: Blobs mit zlib (der Browser
+entpackt sie), darin Protobuf, in zwei Durchgängen – erst die Wege, die der Filter behält, dann nur
+deren Knoten. Jeder Weg wird an jedem Knoten geteilt, den er mit einem anderen teilt; die Kanten
+heißen wie bei SUMO `Weg-ID#Abschnitt`, die Gegenrichtung mit Minus (`-123#0`). Verkehrsmittel und
+Richtung kommen aus den Tags: `car` auf den Straßenklassen ohne Sperre, `bike` dazu auf Radwegen und
+freigegebenen Wegen (nicht auf Autobahnen, Kraftfahrstraßen und bei `bicycle=no|use_sidepath`),
+Einbahnen samt `oneway:bicycle=no` und `cycleway=opposite*`, Kreisverkehre und Autobahnen als
+Einbahn. Filter beim Lesen:
+
+| Filter | behält |
+| --- | --- |
+| Straßen und Radwege (Vorgabe) | `motorway` bis `living_street` ohne `service`, dazu Radwege und für Rad freigegebene Wege |
+| wie matsim-berlin | der Filter aus dem Makefile von matsim-berlin fürs Szenariogebiet: `motorway` bis `tertiary` (ohne `tertiary_link`), `residential`, `living_street`, `unclassified`, `cycleway`, dazu alles mit `bicycle=designated` |
+| nur Hauptstraßen | `motorway` bis `tertiary` samt Rampen, für große Gebiete |
+| alle Wege, auch zu Fuß | jeder Weg mit `highway=*` außer geplanten, Bahnsteigen und Ähnlichem; zu Fuß als `walk` |
+
+Ein Stadtauszug geht gut. Eine Testdatei mit 69 MB (10 Mio. Knoten, 450 000 Kanten) liest Node in
+etwa 7 s; in Chrome dauert es vom Wählen bis zur gezeichneten Karte gut eine halbe Minute. Größere
+Gebiete vorher zuschneiden:
+
+```sh
+osmium extract -p gebiet.poly deutschland.osm.pbf -o gebiet.osm.pbf
+osmium tags-filter gebiet.osm.pbf w/highway -o gebiet-strassen.osm.pbf
+```
+
+Nur zlib-komprimierte Dateien (wie bei Geofabrik); andere schreibt
+`osmium cat ein.osm.pbf -o aus.osm.pbf -f pbf,pbf_compression=zlib` um. Dateien mit der Lage an
+den Wegen (`osmium add-locations-to-ways`) gehen auch. Aus OSM gibt es keine `counts.xml`, nur die
+Zuordnung. Daten © OpenStreetMap-Mitwirkende, [ODbL](https://www.openstreetmap.org/copyright).
+
+**Der Anker.** Die Zuordnungs-CSV trägt je Stelle mit Link den Punkt auf dem Link, der der Stelle am
+nächsten liegt (WGS 84), die Richtung des Links dort und, wenn bekannt, den OSM-Weg – mit Minus,
+wenn es gegen die Zeichenrichtung geht. Der Anker liegt auf der Fahrbahn; die Rohkoordinate der
+Zählstelle liegt oft daneben.
+
+**Übernehmen.** „Zuordnung laden“ überträgt jede geprüfte Zuordnung über ihren Anker, der Reihe nach:
+
+1. dieselbe Link-ID, höchstens 5 m vom Anker
+2. ein Link desselben OSM-Wegs, höchstens 25 m vom Anker (Geometrien aus OSM und MATSim weichen
+   ab). Den Weg kennt die Seite bei SUMO-Netzen aus der Link-ID (`123#0`, `-123#2`; gilt, wenn
+   mindestens 30 % der IDs so aussehen), sonst aus den Attributen `osm:way:id` (pt2matsim) oder
+   `origid`. Das Netz zeigt an, an wie vielen Links es einen Weg gefunden hat.
+3. der einzige passende Link am Anker: der nächste höchstens 5 m, der zweite mindestens 5 m weiter
+
+Immer nur Links mit dem Verkehrsmittel der Stelle und höchstens 45° Abweichung von der Richtung am
+Anker; je Verkehrsmittel trägt ein Link eine Stelle. Was so übernommen ist, gilt als geprüft und
+zeigt, woher und wie. Der Rest kommt zum Prüfen, mit Grund, und wird vom Anker aus gesucht statt von
+der Zählstelle. Typisch dafür: Rad-Zählstellen auf einem eigenen Radweg, den das MATSim-Netz nicht
+hat oder mit der Straße zusammenlegt. Das geht in jede Richtung – OSM auf MATSim, eine Netzversion
+auf die nächste, MATSim auf OSM. Eine CSV ohne Anker (ältere Fassung, MATSims `counts-mapping`)
+gilt weiter über die Link-ID.
 
 ## Daten der Zählkarte
 
@@ -60,10 +123,12 @@ fehlen die meisten Rad-Zählstellen, die beide Richtungen zusammen zählen. Geri
 Berliner Detektoren, die Dauerzählstellen in Baden-Württemberg und Bayern und ein Teil der
 Hamburger Stellen.
 
-Die Berliner Rad-Zählstellen nennen ihre Richtung nicht im Feld `richtung`, sondern im Namen
-(„Jannowitzbrücke Nord“) oder in der Kennung („01-MI-AL-W“). Berlin führt sie als
-Richtungszählstellen, je Fahrtrichtung eine; die Seite liest die Richtung darum für diese Quelle aus
-Name oder Kennung. So kommen 23 der 33 Stellen hinein; die übrigen zählen beide Richtungen.
+Die Berliner Rad-Zählstellen nennen ihre Richtung in den Daten bis November 2026 nicht im Feld
+`richtung`, sondern im Namen („Jannowitzbrücke Nord“) oder in der Kennung („01-MI-AL-W“). Berlin
+führt sie als Richtungszählstellen, je Fahrtrichtung eine; die Seite liest die Richtung darum für
+diese Quelle aus Name oder Kennung, solange das Feld leer ist. So kommen 23 der 33 Stellen hinein;
+die übrigen nennen keine Richtung. Die Zählkarte füllt das Feld künftig selbst
+([zaehlkarte#44](https://github.com/vizsim-lab/zaehlkarte/pull/44)).
 
 Die Zählkarte rechnet nichts um und füllt nichts auf; das gilt hier auch: Nicht gezählte Stunden
 bleiben leer, Tage mit doppelter Stunde 2–3 Uhr (Zeitumstellung) bleiben draußen, und es gibt
@@ -100,15 +165,17 @@ Teilen sich eine Kfz- und eine Rad-Stelle einen Link, stehen beide in einer Mess
 Getrennt mit `;`, im Format von MATSims `CountsOptions` (`--counts-mapping`):
 
 ```
-station;linkid;using;kommentar;zuordnung;abstand_m;richtung;name;quelle
-berlin_viz:TE010;7279;y;;geprüft;49.2;Richtung stadtauswärts (Südwest);Marienfelder Allee;berlin_viz
+station;linkid;using;kommentar;zuordnung;abstand_m;richtung;name;quelle;anker_lon;anker_lat;anker_grad;osm_weg;netz
+berlin_viz:TE010;7279;y;;geprüft;49.2;Richtung stadtauswärts (Südwest);Marienfelder Allee;berlin_viz;13.3712345;52.4123456;214;;berlin-network.xml.gz
 ```
 
 `using` ist `y` für jede Stelle mit Link und leer für ausgelassene. `zuordnung` sagt, wie der Link
-zustande kam: `geprüft`, `automatisch`, `ausgelassen` oder `ohne Link`. Wieder eingelesen stellt
-die CSV die geprüften Links und die ausgelassenen Stellen her; die übrigen sucht die Seite neu. Eine
-CSV ohne die Spalte `zuordnung`, etwa `input/counts_mapping.csv` aus dem Berliner Szenario, gilt
-ganz, so wie MATSim sie liest.
+zustande kam: `geprüft`, `automatisch`, `ausgelassen` oder `ohne Link`. Dahinter der Anker: Punkt
+auf dem Link (WGS 84), Richtung des Links dort (Grad ab Nord), OSM-Weg und das Netz, zu dem die
+`linkid` gehört. MATSim übergeht diese Spalten. Wieder eingelesen überträgt die CSV die geprüften
+Links über den Anker (siehe oben) und stellt die ausgelassenen Stellen her; die übrigen sucht die
+Seite neu. Eine CSV ohne die Spalte `zuordnung`, etwa `input/counts_mapping.csv` aus dem Berliner
+Szenario, gilt ganz, so wie MATSim sie liest.
 
 ## Lizenzen der Daten
 
@@ -147,6 +214,8 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
 - `app.js`: Karte, Ablauf, Prüfen, Mitteln, Ausgabe
 - `worker.js`: hält das Netz, zeichnet es als GeoJSON und sucht Links zu den Stellen
 - `lib/netz.js`: MATSim-Netz und Link-Geometrien lesen (aus kachelwerk)
+- `lib/osm.js`: `.osm.pbf` lesen, Wege filtern und in gerichtete Kanten teilen
+- `lib/uebertrag.js`: eine Zuordnung über ihren Anker auf ein anderes Netz übertragen
 - `lib/crs.js`: Koordinatensysteme (proj4), auch MATSim-Namen wie `DHDN_GK4`
 - `lib/zuordnung.js`: Raster über die Links, Kandidaten, jeder Link nur einmal
 - `lib/richtung.js`: die Richtung aus dem Text der Zählkarte
@@ -161,7 +230,9 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
 - Kurzzeitzählungen, sobald die Zählkarte Werte je Richtung und Knotenarm ausgibt
 - Stellen, die beide Richtungen zusammen zählen
 - Stundenwerte über ganze Jahre (die Zählkarte gibt für die Karte nur die jüngsten 12 Monate aus)
-- die Richtung der Berliner Rad-Zählstellen in der Zählkarte selbst führen (Feld `richtung`), statt sie hier aus dem Namen zu lesen
+- die Sonderregel für die Berliner Rad-Zählstellen streichen, sobald die Zählkarte das Feld
+  `richtung` füllt (zaehlkarte#44) und neu gebaut hat
+- Netze aus MATSims `OsmNetworkReader` tragen keinen OSM-Weg: Übernahme dort nur über ID und Lage
 - den Netz-Leser mit kachelwerk teilen statt ihn zu kopieren
 
 ## Lizenzen

@@ -1,10 +1,13 @@
 // MATSim Counts Snapper: Netz laden, Dauerzählstellen der Zählkarte auf Links legen, prüfen,
 // mitteln und als counts.xml ausgeben. Das Netz liegt im Worker; hier leben Karte und Oberfläche.
+// Ein Netz ist ein MATSim-Netz oder ein OSM-Auszug (.osm.pbf); aus OSM gibt es nur die Zuordnung,
+// die sich mit ihrem Anker (Punkt, Richtung, OSM-Weg) auf ein MATSim-Netz übertragen lässt.
 import { STANDARD_DATEN, VERTRAG, GRUPPEN, leseIndex, leseStunden, detailPfad, tagNr, isoTag } from "./lib/zaehlkarte.js";
 import { kurz, lang } from "./lib/richtung.js";
 import { verteile } from "./lib/zuordnung.js";
 import { VORGABE as MITTEL_VORGABE, WOCHENTAGE, mittle, aggregatText, auswahlText } from "./lib/mitteln.js";
 import { countsXml, zuordnungCsv, leseZuordnungCsv } from "./lib/counts.js";
+import { OSM_FILTER } from "./lib/osm.js";
 
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -392,11 +395,11 @@ function zeigeLinks(lngLat, links, s) {
       ["Richtung", l.grad != null ? `${kurz(l.grad)} ${de(l.grad)}°${l.abweichung != null ? `, ${de(l.abweichung)}° Abweichung` : ""}` : null],
       ["Abstand", s && l.d != null ? `${de(l.d, 1)} m` : null],
       ["modes", l.modes || "(car)"], ["type", l.type], ["name", l.name],
-      ["Tempo", l.kmh != null ? `${de(l.kmh, 1)} km/h` : null], ["capacity", l.capacity != null ? `${de(l.capacity)} Fz/h` : null],
+      ["Tempo", l.kmh != null ? `${de(l.kmh, 1)} km/h` : null], ["capacity", l.capacity != null && !l.osm ? `${de(l.capacity)} Fz/h` : null],
     ].filter(([, v]) => v != null && v !== "");
     const box = document.createElement("div");
     box.className = "linkwahl-eintrag";
-    box.innerHTML = `<strong>${kompassSvg(l.grad)}Link ${esc(l.id)}</strong><dl class="linkinfo">${zeilen.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`;
+    box.innerHTML = `<strong>${kompassSvg(l.grad)}${l.osm ? "Kante" : "Link"} ${esc(l.id)}</strong><dl class="linkinfo">${zeilen.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}${l.weg ? `<dt>OSM-Weg</dt><dd>${wegHtml(l.weg)}</dd>` : ""}</dl>`;
     if (kannZuordnen && linkVon(s)?.id !== l.id) {
       const b = document.createElement("button");
       b.type = "button";
@@ -413,6 +416,20 @@ function zeigeLinks(lngLat, links, s) {
   }
   popup = new maplibregl.Popup({ maxWidth: "300px" }).setLngLat(lngLat).setDOMContent(div).addTo(map);
 }
+
+/** Ein OSM-Weg als Link zu openstreetmap.org; mit Minus: gegen die Zeichenrichtung. */
+function wegHtml(weg) {
+  if (!weg) return "";
+  const id = String(weg).replace(/^-/, "");
+  if (!/^\d+$/.test(id)) return esc(weg);
+  return `<a href="https://www.openstreetmap.org/way/${id}" target="_blank" rel="noopener">${id}</a>${String(weg).startsWith("-") ? " (gegen die Zeichenrichtung)" : ""}`;
+}
+
+const WIE = {
+  id: "gleiche Link-ID am selben Ort",
+  weg: "gleicher OSM-Weg in derselben Richtung",
+  lage: "einziger passender Link am übernommenen Punkt",
+};
 
 // ---------- Netz laden ----------
 let laden = null;
@@ -451,11 +468,12 @@ const fileName = (url) => {
   try { return decodeURIComponent(last); } catch { return last; }
 };
 const folderOf = (url) => new URL(".", url).href;
-const artVon = (name) => (/linkgeometr/i.test(name) || /\.csv(\.gz)?$/i.test(name) ? "geometrien" : /\.xml(\.gz)?$/i.test(name) ? "netz" : null);
+const artVon = (name) => (/linkgeometr/i.test(name) || /\.csv(\.gz)?$/i.test(name) ? "geometrien" : /\.xml(\.gz)?$|\.pbf$/i.test(name) ? "netz" : null);
+const istOsmName = (name) => /\.pbf$/i.test(name ?? "");
 
 /** Der Szenario-Stamm eines Dateinamens, wie in kachelwerk: berlin-v7.0-10pct.output_network.xml.gz -> berlin-v7.0. */
 function scenarioStem(name) {
-  return name.toLowerCase().replace(/\.(xml|csv)(\.gz)?$/, "").split(/[._-]?output_|[._-]?network|[._-]?linkgeometr/)[0].replace(/[._-]\d+(\.\d+)?pct$/, "").replace(/[._-]+$/, "");
+  return name.toLowerCase().replace(/\.osm\.pbf$|\.pbf$/, "").replace(/\.(xml|csv)(\.gz)?$/, "").split(/[._-]?output_|[._-]?network|[._-]?linkgeometr/)[0].replace(/[._-]\d+(\.\d+)?pct$/, "").replace(/[._-]+$/, "");
 }
 function stemFit(netName, geoName) {
   const a = scenarioStem(netName);
@@ -512,12 +530,12 @@ async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = nu
   try {
     const transfer = [bytes.buffer];
     if (geoBytes) transfer.push(geoBytes.buffer);
-    const r = await frage({ type: "netz", name, bytes, geoBytes, crs: $("crs").value.trim() }, transfer);
+    const r = await frage({ type: "netz", name, bytes, geoBytes, crs: $("crs").value.trim(), osmFilter: $("osm-filter").value }, transfer);
     if (nr !== state.ladeNr) return;
     const info = r.info;
     netzWeg();
     netzUrl = URL.createObjectURL(new Blob([r.geojson], { type: "application/geo+json" }));
-    state.netz = { name, url, geoName, geoUrl, beispiel, datei, geoDatei, info, key: url ? `url:${url}` : beispiel ? "beispiel:berlin" : `datei:${name}:${info.links}` };
+    state.netz = { name, url, geoName, geoUrl, beispiel, datei, geoDatei, info, key: url ? `url:${url}` : beispiel ? "beispiel:berlin" : `datei:${name}:${info.links}${info.osm ? `:${info.osm.filterCode}` : ""}` };
     state.einpassen = true;
     zeichneEbenen();
     if (info.bbox) map.fitBounds([[info.bbox[0], info.bbox[1]], [info.bbox[2], info.bbox[3]]], { padding: 30, duration: 0, maxZoom: 15 });
@@ -539,7 +557,7 @@ async function ladeNetzVonUrl({ net, geo = "auto", beispiel = false, crs = null 
   const name = beispiel ? BEISPIEL.name : fileName(net);
   try {
     let geoUrl = null;
-    if (geo === "auto" && !beispiel) {
+    if (geo === "auto" && !beispiel && !istOsmName(net)) {
       setStatus("Link-Geometrien suchen …");
       geoUrl = (await findGeometry(net).catch(() => ({ match: null }))).match?.url ?? null;
     } else if (geo && geo !== "0" && !beispiel) {
@@ -564,7 +582,7 @@ async function nimmDateien(files) {
   const geos = liste.filter((f) => artVon(f.name) === "geometrien");
   if (!netz) {
     if (geos.length && state.netz) return nimmGeometrie(geos[0]);
-    return setStatus("Darunter ist kein MATSim-Netz (network.xml oder .xml.gz).", "error");
+    return setStatus("Darunter ist kein Netz (MATSim network.xml, .xml.gz oder OSM .osm.pbf).", "error");
   }
   const geo = geos.length ? bestGeometry(netz.name, geos.map((g) => ({ name: g.name, file: g })))?.file : null;
   await nimmNetz({
@@ -634,6 +652,25 @@ drop.addEventListener("drop", (e) => {
   nimmDateien(e.dataTransfer.files);
 });
 $("beispiel").addEventListener("click", () => ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true, crs: BEISPIEL.crs }));
+{
+  const sel = $("osm-filter");
+  sel.replaceChildren(...Object.entries(OSM_FILTER).map(([code, f]) => {
+    const o = document.createElement("option");
+    o.value = code;
+    o.textContent = f.name;
+    o.title = f.text;
+    return o;
+  }));
+  const gemerkt = store.get("snapper.osmFilter");
+  if (gemerkt && OSM_FILTER[gemerkt]) sel.value = gemerkt;
+  const hilfe = () => { $("osm-filter-text").textContent = OSM_FILTER[sel.value]?.text ?? ""; };
+  hilfe();
+  sel.addEventListener("change", () => {
+    store.set("snapper.osmFilter", sel.value);
+    hilfe();
+    if (state.netz?.info?.osm) nochmal();
+  });
+}
 $("crs").addEventListener("change", () => {
   // ein anderes CRS wirkt nur auf ein Netz ohne eigenes
   if (state.netz?.info?.crsAusDatei) return;
@@ -664,13 +701,28 @@ function renderQuelle(n) {
   }
   box.append(name);
   if (n.beispiel) box.append(chip("Beispiel", "example"));
-  if (n.info) {
+  const osm = n.info?.osm;
+  if (osm) {
+    box.append(chip("OSM-Auszug", "fit"));
+    box.append(chip(`${de(osm.wege)} Wege, ${de(n.info.links)} Kanten`));
+    box.append(chip(osm.filter));
+  } else if (n.info) {
     box.append(chip(`${de(n.info.links)} Links`));
     box.append(chip(n.info.crs + (n.info.crsAusDatei ? "" : " aus Formular"), n.info.crsAusDatei ? "fit" : ""));
+    const w = n.info.wege;
+    if (w?.links) {
+      const c = chip(`OSM-Weg an ${de((100 * w.links) / n.info.links)} % der Links`);
+      c.title = w.sumo ? "Die Link-IDs sehen nach SUMO aus (Weg-ID#Abschnitt): Eine Zuordnung aus OSM lässt sich über den Weg übernehmen." : "Die Links tragen osm:way:id oder origid: Eine Zuordnung aus OSM lässt sich über den Weg übernehmen.";
+      box.append(c);
+    }
   }
   const geo = $("geo");
   geo.hidden = !n.info;
-  if (n.info) {
+  $("geo-file").closest("label").hidden = Boolean(osm);
+  if (osm) {
+    $("geo-text").innerHTML = 'Die Kanten folgen den Wegen aus OSM, geteilt an jedem Knotenpunkt, und heißen wie bei SUMO: <code>Weg-ID#Abschnitt</code>, die Gegenrichtung mit Minus. Eine <code>counts.xml</code> gibt es dafür nicht, aber eine Zuordnung, die sich auf ein MATSim-Netz übertragen lässt. Daten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap-Mitwirkende</a> (ODbL).';
+    $("geo-clear").hidden = true;
+  } else if (n.info) {
     const g = n.info.geometrien;
     const s = n.info.stats;
     $("geo-text").innerHTML = g
@@ -951,9 +1003,19 @@ async function waehleStellen() {
   await suche();
 }
 
+/**
+ * Von wo aus die Suche geht: vom Anker einer übernommenen Zuordnung (ein Punkt auf der Fahrbahn,
+ * mit der Richtung des Links dort), sonst von der Stelle selbst.
+ */
+function suchpunkt(s) {
+  const e = state.entscheid.get(s.id);
+  const a = e ? e.anker : gespeichert[s.id]?.anker;
+  return a ? { lon: a.lon, lat: a.lat, grad: a.grad ?? s.r.grad } : { lon: s.lon, lat: s.lat, grad: s.r.grad };
+}
+
 async function suche() {
   const t = ++state.suchToken;
-  const stellen = state.stellen.map((s) => ({ id: s.id, lon: s.lon, lat: s.lat, grad: s.r.grad, name: s.name, modi: s.modi }));
+  const stellen = state.stellen.map((s) => ({ id: s.id, ...suchpunkt(s), name: s.name, modi: s.modi }));
   if (!stellen.length) {
     state.ergebnisse.clear();
     nachSuche();
@@ -1022,7 +1084,10 @@ function gruendeVon(s) {
   const w = state.wahl.get(s.id);
   const k = state.ergebnisse.get(s.id)?.kandidaten ?? [];
   if (!w) {
-    if (k.length) return ["Alle passenden Links im Umkreis sind an andere Stellen mit demselben Verkehrsmittel vergeben."];
+    const e = state.entscheid.get(s.id);
+    const vorab = e?.anker && !e.link ? [`Aus „${e.anker.netz ?? "einer Zuordnung"}“ nicht eindeutig übernommen (${e.anker.grund ?? "unklar"}).`] : [];
+    if (vorab.length && !k.length) return [...vorab, "Im Umkreis des übernommenen Punkts liegt kein passender Link."];
+    if (k.length) return [...vorab, "Alle passenden Links im Umkreis sind an andere Stellen mit demselben Verkehrsmittel vergeben."];
     const u = state.ergebnisse.get(s.id)?.umkreis;
     const r = Number($("radius").value) || 50;
     if (!u?.links) return [`Im Umkreis von ${de(r)} m liegt kein Link.`];
@@ -1030,8 +1095,10 @@ function gruendeVon(s) {
     return [`Im Umkreis liegen ${de(u.modus)} Links mit ${s.modi.join(" oder ")}, aber keiner weicht höchstens ${de(Number($("winkel").value) || 60)}° von der Fahrtrichtung ab.`];
   }
   const out = [];
-  if (s.r.grad == null) out.push(`Die Quelle nennt nur das Ziel („${s.r.ziel}“), keine Himmelsrichtung: Hin- oder Rückrichtung prüfen.`);
-  if (w.d > WEIT_M) out.push(`Der Link liegt ${de(w.d)} m von der Stelle entfernt.`);
+  const e = state.entscheid.get(s.id);
+  if (e?.anker && !e.link) out.push(`Aus „${e.anker.netz ?? "einer Zuordnung"}“ nicht eindeutig übernommen (${e.anker.grund ?? "unklar"}). Gesucht wird vom übernommenen Punkt aus.`);
+  if (s.r.grad == null && !e?.anker) out.push(`Die Quelle nennt nur das Ziel („${s.r.ziel}“), keine Himmelsrichtung: Hin- oder Rückrichtung prüfen.`);
+  if (w.d > WEIT_M) out.push(`Der Link liegt ${de(w.d)} m ${e?.anker ? "vom übernommenen Punkt" : "von der Stelle"} entfernt.`);
   if (w.abweichung != null && w.abweichung > WINKEL_PRUEFEN) out.push(`Die Richtung des Links weicht um ${de(w.abweichung)}° ab.`);
   if (k[0] && k[0].i !== w.i) out.push("Der nächste Link ist an eine andere Stelle vergeben.");
   return out;
@@ -1067,8 +1134,8 @@ function speichere() {
   const key = speicherSchluessel();
   if (!key) return;
   for (const [id, e] of state.entscheid) {
-    const roh = { link: e.link?.id ?? null, aus: Boolean(e.aus), kommentar: e.kommentar ?? "" };
-    if (!roh.link && !roh.aus && !roh.kommentar) delete gespeichert[id];
+    const roh = { link: e.link?.id ?? null, aus: Boolean(e.aus), kommentar: e.kommentar ?? "", anker: e.anker ?? null, uebernommen: e.uebernommen ?? null };
+    if (!roh.link && !roh.aus && !roh.kommentar && !roh.anker) delete gespeichert[id];
     else gespeichert[id] = roh;
   }
   store.set(key, JSON.stringify(gespeichert));
@@ -1079,7 +1146,7 @@ async function loeseEntscheide() {
   for (const s of state.stellen) {
     const roh = gespeichert[s.id];
     if (!roh || state.entscheid.has(s.id)) continue;
-    const e = { link: null, aus: Boolean(roh.aus), kommentar: roh.kommentar ?? "" };
+    const e = { link: null, aus: Boolean(roh.aus), kommentar: roh.kommentar ?? "", anker: roh.anker ?? null, uebernommen: roh.uebernommen ?? null };
     if (roh.link) {
       const r = await frage({ type: "link", id: roh.link, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } }).catch(() => null);
       if (r?.link) e.link = r.link;
@@ -1089,8 +1156,14 @@ async function loeseEntscheide() {
 }
 
 function entscheid(id) {
-  if (!state.entscheid.has(id)) state.entscheid.set(id, { link: null, aus: false, kommentar: "" });
+  if (!state.entscheid.has(id)) state.entscheid.set(id, { link: null, aus: false, kommentar: "", anker: null, uebernommen: null });
   return state.entscheid.get(id);
+}
+
+/** Eine Entscheidung von Hand ersetzt, was aus einem anderen Netz übernommen war. */
+function vonHand(e) {
+  e.anker = null;
+  e.uebernommen = null;
 }
 
 function geaendert(meldung) {
@@ -1125,6 +1198,7 @@ async function nimmLink(id, { i, link = null }) {
   const e = entscheid(id);
   e.link = link;
   e.aus = false;
+  vonHand(e);
   geaendert(meldung);
 }
 
@@ -1139,6 +1213,7 @@ function auslassen(id, aus = true) {
   const e = entscheid(id);
   e.aus = aus;
   if (aus) e.link = null;
+  vonHand(e);
   geaendert();
 }
 
@@ -1146,7 +1221,12 @@ function zuruecksetzen(id) {
   const e = entscheid(id);
   e.link = null;
   e.aus = false;
-  geaendert();
+  const neuSuchen = Boolean(e.anker);
+  vonHand(e);
+  if (neuSuchen) {
+    speichere();
+    suche();
+  } else geaendert();
 }
 
 /** Zwei Stellen ohne Himmelsrichtung am selben Ort tauschen ihre Links. */
@@ -1171,8 +1251,8 @@ async function tausche(id) {
     frage({ type: "link", i: b.i, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } }),
     frage({ type: "link", i: a.i, stelle: { lon: t.lon, lat: t.lat, grad: t.r.grad } }),
   ]);
-  Object.assign(entscheid(s.id), { link: fuerS.link, aus: false });
-  Object.assign(entscheid(t.id), { link: fuerT.link, aus: false });
+  Object.assign(entscheid(s.id), { link: fuerS.link, aus: false, anker: null, uebernommen: null });
+  Object.assign(entscheid(t.id), { link: fuerT.link, aus: false, anker: null, uebernommen: null });
   geaendert(`${s.name}: ${s.r.ziel} und ${t.r.ziel} haben die Links getauscht.`);
 }
 
@@ -1408,13 +1488,14 @@ function renderKarte() {
   const gruende = lage === "pruefen" || lage === "ohne" ? gruendeVon(s) : [];
   const zeile = (k, v) => (v == null || v === "" ? "" : `<dt>${esc(k)}</dt><dd>${v}</dd>`);
   const linkHtml = link
-    ? `<dl class="linkinfo">${zeile("Link", esc(link.id))}${zeile("Abstand", link.d != null ? `${de(link.d, 1)} m` : null)}${zeile("Richtung", link.grad != null ? `${kurz(link.grad)} ${de(link.grad)}°${link.abweichung != null ? `, ${de(link.abweichung)}° Abweichung` : ""}` : null)}${zeile("type", esc(link.type ?? ""))}${zeile("name", esc(link.name ?? ""))}${zeile("modes", esc(link.modes || "(car)"))}${zeile("Tempo", link.kmh != null ? `${de(link.kmh, 1)} km/h` : null)}${zeile("capacity", link.capacity != null ? `${de(link.capacity)} Fz/h, ${de(link.permlanes ?? 0, 1)} Fahrstreifen` : null)}</dl>`
+    ? `<dl class="linkinfo">${zeile("Link", esc(link.id))}${zeile("Abstand", link.d != null ? `${de(link.d, 1)} m` : null)}${zeile("Richtung", link.grad != null ? `${kurz(link.grad)} ${de(link.grad)}°${link.abweichung != null ? `, ${de(link.abweichung)}° Abweichung` : ""}` : null)}${zeile("type", esc(link.type ?? ""))}${zeile("name", esc(link.name ?? ""))}${zeile("modes", esc(link.modes || "(car)"))}${zeile("OSM-Weg", wegHtml(link.weg))}${zeile("Tempo", link.kmh != null ? `${de(link.kmh, 1)} km/h` : null)}${zeile("capacity", link.capacity != null && !link.osm ? `${de(link.capacity)} Fz/h, ${de(link.permlanes ?? 0, 1)} Fahrstreifen` : null)}</dl>`
     : "";
   box.innerHTML = `
     <div><h3>${esc(s.name || s.id)}</h3>${s.abschnitt ? `<p class="sub">${esc(s.abschnitt)}</p>` : ""}</div>
     <div class="meta">${kompassSvg(s.r.grad)}<span>${esc(richtungsText(s))}</span></div>
     <div class="meta"><span>${esc(s.id)}</span>·<span>${esc(q.name)}</span>·<span>${lizenz}</span>·<span>${s.gruppen.map((g) => esc(state.daten.gruppenNamen[g] ?? g)).join(", ")}</span></div>
-    <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE[lage]})">${esc(LAGE_TEXT[lage])}${e?.link && state.wahl.get(s.id)?.id !== e.link.id ? " · von Hand" : ""}</span></div>
+    <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE[lage]})">${esc(LAGE_TEXT[lage])}${e?.uebernommen && e.link ? " · übernommen" : e?.link && kand[0]?.id !== e.link.id ? " · von Hand" : ""}</span></div>
+    ${e?.uebernommen && e.link ? `<p class="note">Übernommen aus „${esc(e.uebernommen.netz ?? "einer Zuordnung")}“: ${esc(WIE[e.uebernommen.wie] ?? e.uebernommen.wie)}${e.uebernommen.d != null ? `, ${de(e.uebernommen.d, 1)} m vom übernommenen Punkt` : ""}.</p>` : ""}
     ${gruende.length ? `<ul class="gruende">${gruende.map((g) => `<li>${esc(g)}</li>`).join("")}</ul>` : ""}
     ${linkHtml}
     <div class="row">
@@ -1732,7 +1813,10 @@ function baueCounts() {
 
 function renderExport() {
   const bereit = state.stellen.length > 0;
-  for (const id of ["counts-xml", "counts-gz", "zuordnung-csv"]) $(id).disabled = !bereit;
+  const osm = Boolean(state.netz?.info?.osm);
+  for (const id of ["counts-xml", "counts-gz"]) $(id).disabled = !bereit || osm;
+  $("zuordnung-csv").disabled = !bereit;
+  $("osm-export").hidden = !osm;
   const genutzt = genutzteStellen();
   const fehlt = genutzt.filter((s) => !state.stunden.has(s.id)).length;
   const offen = zaehle("pruefen");
@@ -1794,11 +1878,45 @@ async function exportiere(gz) {
 $("counts-xml").addEventListener("click", () => exportiere(false));
 $("counts-gz").addEventListener("click", () => exportiere(true));
 
+/** Der Punkt einer Linie in WGS 84, der (lon, lat) am nächsten liegt, mit ihrer Richtung dort (Grad ab Nord). */
+function punktAufLinie(lon, lat, geom) {
+  const kx = Math.cos((lat * Math.PI) / 180);
+  let best = null;
+  let bestD = Infinity;
+  for (let k = 0; k + 1 < geom.length; k++) {
+    const [ax, ay] = geom[k];
+    const [bx, by] = geom[k + 1];
+    const dx = (bx - ax) * kx;
+    const dy = by - ay;
+    const ll = dx * dx + dy * dy;
+    const t = ll > 0 ? Math.max(0, Math.min(1, (((lon - ax) * kx) * dx + (lat - ay) * dy) / ll)) : 0;
+    const px = ax + t * (bx - ax);
+    const py = ay + t * (by - ay);
+    const d = Math.hypot((px - lon) * kx, py - lat);
+    if (d < bestD) {
+      bestD = d;
+      best = { lon: px, lat: py, grad: ll > 0 ? ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360 : null };
+    }
+  }
+  return best;
+}
+
+/** Der Anker einer Stelle: der Punkt ihres Links, der ihrem Suchpunkt am nächsten liegt. */
+function ankerVon(s) {
+  const link = linkVon(s);
+  if (!link?.geom?.length) return null;
+  const p = suchpunkt(s);
+  return punktAufLinie(p.lon, p.lat, link.geom);
+}
+
+const netzName = () => (state.netz?.beispiel ? BEISPIEL.name : state.netz?.name ?? "");
+
 $("zuordnung-csv").addEventListener("click", () => {
   const zeilen = state.stellen.map((s) => {
     const link = linkVon(s);
     const e = state.entscheid.get(s.id);
     const lage = lageVon(s);
+    const a = lage === "aus" ? null : ankerVon(s);
     return {
       station: s.id,
       linkid: link?.id ?? "",
@@ -1809,6 +1927,11 @@ $("zuordnung-csv").addEventListener("click", () => {
       richtung: richtungsText(s),
       name: s.name,
       quelle: s.quelle,
+      anker_lon: a ? a.lon.toFixed(7) : "",
+      anker_lat: a ? a.lat.toFixed(7) : "",
+      anker_grad: a?.grad != null ? Math.round(a.grad) : "",
+      osm_weg: link?.weg ?? "",
+      netz: link ? netzName() : "",
     };
   });
   speichern(`${stamm()}-counts-zuordnung.csv`, zuordnungCsv(zeilen), "text/csv");
@@ -1824,6 +1947,7 @@ $("csv-file").addEventListener("change", async (e) => {
     let gesetzt = 0;
     let fremd = 0;
     let ohneLink = 0;
+    const mitAnker = [];
     for (const z of zeilen) {
       const s = state.byId.get(z.station);
       if (!s) {
@@ -1837,18 +1961,68 @@ $("csv-file").addEventListener("change", async (e) => {
       if (!z.using) {
         ent.aus = true;
         ent.link = null;
+        vonHand(ent);
         gesetzt++;
         continue;
       }
       ent.aus = false;
+      // mit Anker: übertragen, auch auf dasselbe Netz (dann passt die ID am selben Ort)
+      if (z.anker) {
+        mitAnker.push({ s, z });
+        continue;
+      }
       if (!z.linkid) continue;
       const r = await frage({ type: "link", id: z.linkid, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } }).catch(() => null);
       if (r?.link) {
         ent.link = r.link;
+        vonHand(ent);
         gesetzt++;
       } else ohneLink++;
     }
-    geaendert(`${file.name}: ${de(gesetzt)} Entscheidungen übernommen${fremd ? `, ${de(fremd)} Stationen gehören nicht zur Auswahl` : ""}${ohneLink ? `, ${de(ohneLink)} Links fehlen im Netz` : ""}.`);
+    const wie = { id: 0, weg: 0, lage: 0 };
+    let offen = 0;
+    if (mitAnker.length) {
+      const r = await frage({
+        type: "uebertrage",
+        anker: mitAnker.map(({ s, z }) => ({ id: s.id, lon: z.anker.lon, lat: z.anker.lat, grad: z.anker.grad, linkId: z.linkid || null, weg: z.weg, modi: s.modi, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } })),
+      });
+      const nach = new Map(r.ergebnisse.map((x) => [x.id, x]));
+      // ein Link trägt je Verkehrsmittel eine Stelle: bei zweien gewinnt, wessen Anker näher liegt
+      const belegt = new Map();
+      for (const [andere, e] of state.entscheid) if (e.link && !mitAnker.some(({ s }) => s.id === andere)) belegt.set(e.link.id, [...(belegt.get(e.link.id) ?? []), andere]);
+      const reihe = [...mitAnker].sort((a, b) => (nach.get(a.s.id)?.ankerAbstand ?? Infinity) - (nach.get(b.s.id)?.ankerAbstand ?? Infinity));
+      for (const { s, z } of reihe) {
+        const x = nach.get(s.id);
+        const ent = entscheid(s.id);
+        const herkunft = z.netz || file.name;
+        ent.anker = { lon: z.anker.lon, lat: z.anker.lat, grad: z.anker.grad, weg: z.weg, netz: herkunft };
+        const modi = ausgabeModi(s);
+        const schon = x?.link ? (belegt.get(x.link.id) ?? []).find((t) => ausgabeModi(state.byId.get(t) ?? { aktiv: [] }).some((m) => modi.includes(m))) : null;
+        if (x?.link && !schon) {
+          ent.link = x.link;
+          ent.uebernommen = { wie: x.wie, netz: herkunft, d: x.ankerAbstand != null ? Math.round(x.ankerAbstand * 10) / 10 : null };
+          belegt.set(x.link.id, [...(belegt.get(x.link.id) ?? []), s.id]);
+          wie[x.wie]++;
+        } else {
+          ent.link = null;
+          ent.uebernommen = null;
+          ent.anker.grund = schon ? `der passende Link ${x.link.id} gehört schon zu ${state.byId.get(schon)?.name || schon}` : x?.grund ?? "unklar";
+          offen++;
+        }
+      }
+    }
+    const teile = [`${file.name}:`];
+    const uebernommen = wie.id + wie.weg + wie.lage;
+    if (mitAnker.length) teile.push(`${de(uebernommen)} von ${de(mitAnker.length)} geprüften Zuordnungen übernommen${uebernommen ? ` (${[[wie.id, "gleiche Link-ID"], [wie.weg, "gleicher OSM-Weg"], [wie.lage, "eindeutige Lage"]].filter(([n]) => n).map(([n, t]) => `${de(n)} ${t}`).join(", ")})` : ""}${offen ? `, ${de(offen)} zum Prüfen` : ""}.`);
+    if (gesetzt || !mitAnker.length) teile.push(`${de(gesetzt)} Entscheidungen ${mitAnker.length ? "ohne Anker " : ""}übernommen.`);
+    if (fremd) teile.push(`${de(fremd)} Stationen gehören nicht zur Auswahl.`);
+    if (ohneLink) teile.push(`${de(ohneLink)} Links fehlen im Netz.`);
+    if (mitAnker.length) {
+      // die offenen suchen jetzt vom Anker aus
+      speichere();
+      await suche();
+      setStatus(teile.join(" "), "done");
+    } else geaendert(teile.join(" "));
   } catch (err) {
     setStatus(`${file.name}: ${err.message}`, "error");
   }

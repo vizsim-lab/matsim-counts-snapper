@@ -286,7 +286,7 @@ code { font: 0.92em var(--font-mono); }
 <div class="app">
   <aside class="panel">
     <div class="plate"><h1>MATSim Counts Snapper</h1><span>Zählkarte · Links · counts.xml</span></div>
-    <p class="lede">Legt Dauerzählstellen der <a href="https://vizsim-lab.github.io/zaehlkarte/" target="_blank" rel="noopener">Zählkarte</a> auf die Links eines MATSim-Netzes, mittelt ihre Stundenwerte und schreibt eine <code>counts.xml</code>. Alles läuft im Browser; eigene Dateien verlassen das Gerät nicht.</p>
+    <p class="lede">Legt Dauerzählstellen der <a href="https://vizsim-lab.github.io/zaehlkarte/" target="_blank" rel="noopener">Zählkarte</a> auf die Links eines MATSim-Netzes, mittelt ihre Stundenwerte und schreibt eine <code>counts.xml</code>. Geprüft werden kann auch auf einem OSM-Auszug: Die Zuordnung lässt sich dann auf jede Netzversion übertragen. Alles läuft im Browser; eigene Dateien verlassen das Gerät nicht.</p>
 
     <div class="status" id="status" data-state="idle" aria-live="polite">
       <span class="text" id="status-text">Wartet auf ein Netz.</span>
@@ -297,8 +297,8 @@ code { font: 0.92em var(--font-mono); }
       <h2 id="h-netz"><b>1</b>Netz</h2>
       <label class="drop" id="drop" for="file">
         <strong>Netz wählen oder hierher ziehen</strong>
-        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>). Mit Geometrien passen die Abstände besser.</small>
-        <input type="file" id="file" multiple accept=".xml,.gz,.csv,application/gzip,application/xml,text/xml,text/csv">
+        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>). Mit Geometrien passen die Abstände besser. Oder ein OSM-Auszug (<code>.osm.pbf</code>): Dann ist das Ergebnis eine Zuordnung, die sich auf jedes MATSim-Netz übertragen lässt.</small>
+        <input type="file" id="file" multiple accept=".xml,.gz,.csv,.pbf,application/gzip,application/xml,text/xml,text/csv">
       </label>
       <details class="svn" id="svn">
         <summary>Aus dem VSP-SVN laden <small>public-svn, countries/de</small></summary>
@@ -337,6 +337,11 @@ code { font: 0.92em var(--font-mono); }
           <button type="button" class="btn secondary small" id="beispiel">Berlin laden</button>
         </div>
         <div class="field wide"><small>Das Koordinatensystem gilt, wenn das Netz keins nennt (Attribut <code>coordinateReferenceSystem</code>). Auch proj4-Definitionen gehen, etwa von epsg.io.</small></div>
+        <div class="field wide">
+          <label for="osm-filter">Wege aus OSM</label>
+          <select id="osm-filter"></select>
+          <small><span id="osm-filter-text"></span> Gilt beim Lesen einer <code>.osm.pbf</code>. Große Gebiete vorher zuschneiden: <code>osmium extract -p gebiet.poly</code>, <code>osmium tags-filter … w/highway</code>.</small>
+        </div>
       </div>
       <p class="credit" id="credit" hidden></p>
     </section>
@@ -452,7 +457,8 @@ code { font: 0.92em var(--font-mono); }
         <button type="button" class="btn secondary" id="counts-gz" disabled>.xml.gz</button>
         <button type="button" class="btn secondary" id="zuordnung-csv" disabled>Zuordnung (CSV)</button>
       </div>
-      <p class="note">Die Zuordnung ist eine CSV im Format von MATSims <code>--counts-mapping</code>: Station, <code>linkid</code>, <code>using</code>, Kommentar, dazu wie der Link zustande kam. Wieder eingelesen stellt sie die geprüften Links und die ausgelassenen Stellen her; die übrigen sucht die Seite neu.
+      <p class="note" id="osm-export" hidden>Aus einem OSM-Auszug gibt es keine <code>counts.xml</code>: Die Kanten gehören zu keinem MATSim-Netz. Die Zuordnung (CSV) trägt je Stelle den Punkt auf der Straße, die Richtung und den OSM-Weg; mit einem MATSim-Netz geladen, wird sie dort übernommen.</p>
+      <p class="note">Die Zuordnung ist eine CSV im Format von MATSims <code>--counts-mapping</code>: Station, <code>linkid</code>, <code>using</code>, Kommentar, dazu wie der Link zustande kam und sein Anker – der Punkt auf dem Link, seine Richtung und der OSM-Weg. Wieder eingelesen, auch zu einem anderen Netz oder aus OSM, überträgt sie die geprüften Links über den Anker: gleiche Link-ID am selben Ort, gleicher OSM-Weg in derselben Richtung oder der einzige passende Link am Punkt. Was so nicht eindeutig ist, kommt zum Prüfen; ausgelassene Stellen bleiben ausgelassen.
         <label class="linkbtn">Zuordnung laden<input type="file" id="csv-file" class="visually-hidden" accept=".csv,text/csv"></label></p>
       <p class="note" id="export-text" hidden></p>
       <div class="field" id="quellen-box" hidden>

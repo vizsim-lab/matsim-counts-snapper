@@ -277,19 +277,19 @@ test("counts: XML nach counts_v2 und Zuordnung als CSV", () => {
     { station: "berlin_viz:TE001", linkid: "ab", using: true, kommentar: 'passt; "sicher"', zuordnung: "geprüft", abstand_m: 3.5, richtung: "SW", name: "A115", quelle: "berlin_viz" },
     { station: "berlin_viz:TE002", linkid: "", using: false, kommentar: "", zuordnung: "ausgelassen", abstand_m: null, richtung: "NO", name: "A115", quelle: "berlin_viz" },
   ]);
-  assert.equal(csv.split("\n")[0], "station;linkid;using;kommentar;zuordnung;abstand_m;richtung;name;quelle");
-  assert.equal(csv.split("\n")[1], 'berlin_viz:TE001;ab;y;"passt; ""sicher""";geprüft;3.5;SW;A115;berlin_viz');
+  assert.equal(csv.split("\n")[0], "station;linkid;using;kommentar;zuordnung;abstand_m;richtung;name;quelle;anker_lon;anker_lat;anker_grad;osm_weg;netz");
+  assert.equal(csv.split("\n")[1], 'berlin_viz:TE001;ab;y;"passt; ""sicher""";geprüft;3.5;SW;A115;berlin_viz;;;;;');
   assert.deepEqual(leseZuordnungCsv(csv), [
-    { station: "berlin_viz:TE001", linkid: "ab", using: true, kommentar: 'passt; "sicher"', zuordnung: "geprüft" },
-    { station: "berlin_viz:TE002", linkid: "", using: false, kommentar: "", zuordnung: "ausgelassen" },
+    { station: "berlin_viz:TE001", linkid: "ab", using: true, kommentar: 'passt; "sicher"', zuordnung: "geprüft", anker: null, weg: null, netz: null },
+    { station: "berlin_viz:TE002", linkid: "", using: false, kommentar: "", zuordnung: "ausgelassen", anker: null, weg: null, netz: null },
   ]);
   // wie input/counts_mapping.csv im Berliner Szenario: Using leer heißt auslassen
   assert.deepEqual(leseZuordnungCsv("MQ_ID;linkid;Using;Kommentar;Check\n10016;80205;;same as 10015;\n10017;4711;x;;\n"), [
-    { station: "10016", linkid: "80205", using: false, kommentar: "same as 10015", zuordnung: null },
-    { station: "10017", linkid: "4711", using: true, kommentar: "", zuordnung: null },
+    { station: "10016", linkid: "80205", using: false, kommentar: "same as 10015", zuordnung: null, anker: null, weg: null, netz: null },
+    { station: "10017", linkid: "4711", using: true, kommentar: "", zuordnung: null, anker: null, weg: null, netz: null },
   ]);
   // ohne using und ignore: alle verwenden; linkid vorne: Station in Spalte zwei
-  assert.deepEqual(leseZuordnungCsv("link_id,station\n1,A\n"), [{ station: "A", linkid: "1", using: true, kommentar: "", zuordnung: null }]);
+  assert.deepEqual(leseZuordnungCsv("link_id,station\n1,A\n"), [{ station: "A", linkid: "1", using: true, kommentar: "", zuordnung: null, anker: null, weg: null, netz: null }]);
   assert.deepEqual(leseZuordnungCsv("station;linkid;ignore\nA;1;y\nB;2;\n").map((z) => z.using), [false, true]);
   assert.throws(() => leseZuordnungCsv("station;link\nA;1\n"), /linkid/);
 });
