@@ -2,12 +2,16 @@
 // mitteln und als counts.xml ausgeben. Das Netz liegt im Worker; hier leben Karte und Oberfläche.
 // Ein Netz ist ein MATSim-Netz oder ein OSM-Auszug (.osm.pbf); aus OSM gibt es nur die Zuordnung,
 // die sich mit ihrem Anker (Punkt, Richtung, OSM-Weg) auf ein MATSim-Netz übertragen lässt.
-import { STANDARD_DATEN, VERTRAG, GRUPPEN, leseIndex, leseStunden, detailPfad, tagNr, isoTag } from "./lib/zaehlkarte.js";
+// Wahlweise kommen Kurzzeitzählungen dazu (lib/kurzzeit.js): je Knotenarm eine Zufahrt und eine
+// Ausfahrt, je Querschnitt die Fahrtrichtungen. Sie sind eine zweite Familie von Stellen
+// (`familie: "kurz"`), gehen nach den Dauerzählstellen an die Links und in eine eigene Datei.
+import { STANDARD_DATEN, VERTRAG, GRUPPEN, leseIndex, leseStunden, detailPfad, tagNr, isoTag, wochentag } from "./lib/zaehlkarte.js";
 import { kurz, lang } from "./lib/richtung.js";
 import { verteile } from "./lib/zuordnung.js";
 import { VORGABE as MITTEL_VORGABE, WOCHENTAGE, mittle, aggregatText, auswahlText } from "./lib/mitteln.js";
 import { countsXml, zuordnungCsv, leseZuordnungCsv } from "./lib/counts.js";
 import { OSM_FILTER } from "./lib/osm.js";
+import { STROEME_VERTRAG, KURZ_GRUPPEN, KURZ_VORGABE, TAGTYP, leseManifest, leseStellen, stroemePfad, waehleZaehlungen, punkte as kurzPunkte, lizenzenVon } from "./lib/kurzzeit.js";
 
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -69,7 +73,23 @@ const state = {
   ergebnisMittel: new Map(), // id -> { gruppe: mittle(...) }
   suchToken: 0,
   ladeNr: 0, // das jüngste Netz gewinnt, wenn zwei gleichzeitig gelesen werden
+  familie: "alle", // Filter der Liste: alle, dauer, kurz
+  // Kurzzeitzählungen: Einstellungen, Daten der Zählkarte (manifest.json, index.json, stroeme/…)
+  kurz: {
+    an: false,
+    opts: { ...KURZ_VORGABE, lieferungen: {} }, // lieferungen: „quelle:code“ -> an/aus, wo jemand gewählt hat
+    manifest: null, // leseManifest(...)
+    stellen: null, // leseStellen(...): Map ID -> Stelle
+    dateien: new Map(), // "quelle-jahr" -> Promise des JSON
+    laedt: null, // Promise, solange manifest und index kommen
+    fehler: null,
+    info: null, // was die letzte Auswahl ergab
+  },
 };
+const KURZ_LISTE_MAX = 400; // so viele Stellen zeigt die Liste höchstens, die gewählte immer
+const familieVon = (s) => s?.familie ?? "dauer";
+// Kurzzeit-IDs tragen Zählung und Arm hinter „/“; die der Dauerzählstellen nie
+const familieVonId = (id) => (String(id).includes("/") ? "kurz" : "dauer");
 
 // ---------- Status ----------
 function setStatus(text, kind = "busy", pct = null) {
@@ -145,7 +165,13 @@ const lageFarbe = () => ["match", ["get", "lage"], ...LAGEN.flatMap((l) => [l, c
 const netzFarbe = () => (basemap === "dark" ? "#7d8a9c" : basemap === "positron" ? "#5f6b79" : css("--muted"));
 const halo = () => (basemap === "dark" ? "#0c0c0c" : basemap === "positron" ? "#ffffff" : css("--map-bg"));
 
-const EIGENE = ["kandidaten-linie", "zuordnung-linie", "zuordnung-pfeil", "schnapp-linie", "kandidaten-rang", "stellen-kreis", "stellen-pfeil"];
+const EIGENE = ["kandidaten-linie", "zuordnung-linie", "zuordnung-pfeil", "auswahl-linie", "schnapp-linie", "kandidaten-rang", "arme-linie", "stellen-kreis", "stellen-pfeil", "auswahl-kreis", "auswahl-pfeil"];
+// Kurzzeit-Punkte als Ring (innen der Hintergrund), Dauerzählstellen gefüllt; die gewählte Stelle immer gefüllt
+const istKurz = ["==", ["get", "kurz"], 1];
+const istSel = ["==", ["get", "sel"], 1];
+const kreisFarbe = () => ["case", ["all", istKurz, ["!", istSel]], halo(), lageFarbe()];
+const kreisRand = () => ["case", istSel, css("--fg"), istKurz, lageFarbe(), halo()];
+const pfeilFarbe = () => ["case", ["all", istKurz, ["!", istSel]], lageFarbe(), "#ffffff"];
 // MATSim fährt rechts: Hin- und Rückrichtung liegen ab Zoom 14 nebeneinander, jede auf ihrer Seite
 const VERSATZ = ["interpolate", ["linear"], ["zoom"], 13, 0, 15, 1.5, 17, 3.5, 19, 6];
 
@@ -186,16 +212,30 @@ function zeichneEbenen() {
   quelle("kandidaten");
   quelle("zuordnung");
   quelle("schnapp");
+  quelle("arme");
   quelle("stellen");
+  quelle("auswahl");
+  // die Karte zeigt neue Daten, sobald sie gezeichnet werden
+  gezeichnet = -1;
   const add = (layer, before) => { if (!map.getLayer(layer.id)) map.addLayer(layer, before); };
+  const linie = { layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": lageFarbe(), "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 16, ["case", istSel, 9, 6]], "line-offset": VERSATZ, "line-opacity": 0.9 } };
+  const kreis = { paint: { "circle-color": kreisFarbe(), "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, ["case", istSel, 6, istKurz, 2.5, 3.5], 15, ["case", istSel, 11, istKurz, 6, 7]], "circle-stroke-color": kreisRand(), "circle-stroke-width": ["case", istSel, 2.5, istKurz, 2, 1.2] } };
+  const pfeil = { minzoom: 12, layout: { "icon-image": "nord", "icon-rotate": ["get", "grad"], "icon-rotation-alignment": "map", "icon-size": ["interpolate", ["linear"], ["zoom"], 12, 0.3, 16, 0.5], "icon-allow-overlap": true, "icon-ignore-placement": true }, paint: { "icon-color": pfeilFarbe() } };
+  const istPunkt = ["==", ["geometry-type"], "Point"];
   add({ id: "kandidaten-linie", type: "line", source: "kandidaten", layout: { "line-cap": "round" }, paint: { "line-color": css("--fg"), "line-width": 2.5, "line-offset": VERSATZ, "line-dasharray": [1.2, 1.4], "line-opacity": 0.85 } });
-  add({ id: "zuordnung-linie", type: "line", source: "zuordnung", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": lageFarbe(), "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 16, ["case", ["==", ["get", "sel"], 1], 9, 6]], "line-offset": VERSATZ, "line-opacity": 0.9 } });
+  add({ id: "zuordnung-linie", type: "line", source: "zuordnung", ...linie });
   add({ id: "zuordnung-pfeil", type: "symbol", source: "zuordnung", minzoom: 13, layout: { "symbol-placement": "line", "symbol-spacing": 36, "icon-image": "pfeil", "icon-size": ["interpolate", ["linear"], ["zoom"], 13, 0.35, 17, 0.6], "icon-allow-overlap": true, "icon-ignore-placement": true }, paint: { "icon-color": halo() } });
+  add({ id: "auswahl-linie", type: "line", source: "auswahl", filter: ["==", ["geometry-type"], "LineString"], ...linie });
   add({ id: "schnapp-linie", type: "line", source: "schnapp", paint: { "line-color": lageFarbe(), "line-width": 1.5, "line-dasharray": [1, 1.5] } });
   // Zahlen brauchen Glyphen; die Karte „Ohne“ hat keine, dann stehen die Ränge nur in der Tabelle
   if (map.getStyle().glyphs) add({ id: "kandidaten-rang", type: "symbol", source: "kandidaten", minzoom: 13, layout: { "symbol-placement": "line-center", "text-field": ["to-string", ["get", "rang"]], "text-size": 13, "text-font": ["Noto Sans Bold"], "text-allow-overlap": true }, paint: { "text-color": css("--fg"), "text-halo-color": halo(), "text-halo-width": 2.5 } });
-  add({ id: "stellen-kreis", type: "circle", source: "stellen", paint: { "circle-color": lageFarbe(), "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, ["case", ["==", ["get", "sel"], 1], 6, 3.5], 15, ["case", ["==", ["get", "sel"], 1], 11, 7]], "circle-stroke-color": ["case", ["==", ["get", "sel"], 1], css("--fg"), halo()], "circle-stroke-width": ["case", ["==", ["get", "sel"], 1], 2.5, 1.2] } });
-  add({ id: "stellen-pfeil", type: "symbol", source: "stellen", minzoom: 12, filter: [">=", ["get", "grad"], 0], layout: { "icon-image": "nord", "icon-rotate": ["get", "grad"], "icon-rotation-alignment": "map", "icon-size": ["interpolate", ["linear"], ["zoom"], 12, 0.3, 16, 0.5], "icon-allow-overlap": true, "icon-ignore-placement": true }, paint: { "icon-color": "#ffffff" } });
+  // vom Knoten zu den Punkten seiner Arme
+  add({ id: "arme-linie", type: "line", source: "arme", minzoom: 14, paint: { "line-color": css("--muted"), "line-width": 1.2, "line-dasharray": [2, 2], "line-opacity": 0.8 } });
+  add({ id: "stellen-kreis", type: "circle", source: "stellen", ...kreis });
+  add({ id: "stellen-pfeil", type: "symbol", source: "stellen", filter: [">=", ["get", "grad"], 0], ...pfeil });
+  // die gewählte Stelle obenauf, aus einer eigenen kleinen Quelle: Wählen zeichnet nicht alle neu
+  add({ id: "auswahl-kreis", type: "circle", source: "auswahl", filter: istPunkt, ...kreis });
+  add({ id: "auswahl-pfeil", type: "symbol", source: "auswahl", filter: ["all", istPunkt, [">=", ["get", "grad"], 0]], ...pfeil });
   zeichneDaten();
 }
 
@@ -216,30 +256,42 @@ function setzeDaten(id, fc) {
   map.getSource(id)?.setData(fc);
 }
 
-/** Die Stellen, ihre Links und die Kandidaten der gewählten Stelle als GeoJSON. */
+// Stand der Zuordnung: wächst mit jeder Verteilung (verteileNeu). Die Karte zeichnet alle Stellen
+// nur neu, wenn er sich geändert hat; mit Tausenden von Kurzzeit-Punkten kostet das spürbar Zeit.
+let stand = 0;
+let gezeichnet = -1;
+
+/** Die Stellen, ihre Links und die Kandidaten der gewählten Stelle als GeoJSON; die gewählte Stelle eigens. */
 function zeichneDaten() {
   if (!styleReady) return;
-  const stellen = [];
-  const zuordnung = [];
-  const schnapp = [];
-  for (const s of state.stellen) {
+  const punkt = (s, sel) => ({ type: "Feature", properties: { id: s.id, lage: lageVon(s), sel, grad: s.r.grad ?? -1, kurz: familieVon(s) === "kurz" ? 1 : 0 }, geometry: { type: "Point", coordinates: [s.lon, s.lat] } });
+  const linkLinie = (s, sel) => {
     const lage = lageVon(s);
-    const sel = s.id === state.auswahl ? 1 : 0;
-    stellen.push({ type: "Feature", properties: { id: s.id, lage, sel, grad: s.r.grad ?? -1 }, geometry: { type: "Point", coordinates: [s.lon, s.lat] } });
     const link = lage === "aus" ? null : linkVon(s);
-    if (link?.geom?.length >= 2) {
-      zuordnung.push({ type: "Feature", properties: { stelle: s.id, lage, sel }, geometry: { type: "LineString", coordinates: link.geom } });
-      const p = naechsterPunktWgs(s.lon, s.lat, link.geom);
-      if (p) schnapp.push({ type: "Feature", properties: { lage }, geometry: { type: "LineString", coordinates: [[s.lon, s.lat], p] } });
+    return link?.geom?.length >= 2 ? { type: "Feature", properties: { stelle: s.id, lage, sel }, geometry: { type: "LineString", coordinates: link.geom } } : null;
+  };
+  if (gezeichnet !== stand) {
+    gezeichnet = stand;
+    const stellen = [];
+    const zuordnung = [];
+    const schnapp = [];
+    const arme = [];
+    for (const s of state.stellen) {
+      stellen.push(punkt(s, 0));
+      if (familieVon(s) === "kurz" && s.kurz.art === "knoten") arme.push({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: [[s.kurz.knoten.lon, s.kurz.knoten.lat], [s.lon, s.lat]] } });
+      const l = linkLinie(s, 0);
+      if (!l) continue;
+      zuordnung.push(l);
+      const p = naechsterPunktWgs(s.lon, s.lat, l.geometry.coordinates);
+      if (p) schnapp.push({ type: "Feature", properties: { lage: l.properties.lage }, geometry: { type: "LineString", coordinates: [[s.lon, s.lat], p] } });
     }
+    setzeDaten("stellen", { type: "FeatureCollection", features: stellen });
+    setzeDaten("zuordnung", { type: "FeatureCollection", features: zuordnung });
+    setzeDaten("schnapp", { type: "FeatureCollection", features: schnapp });
+    setzeDaten("arme", { type: "FeatureCollection", features: arme });
   }
-  // die gewählte Stelle zuletzt, damit sie oben liegt
-  stellen.sort((a, b) => a.properties.sel - b.properties.sel);
-  zuordnung.sort((a, b) => a.properties.sel - b.properties.sel);
-  setzeDaten("stellen", { type: "FeatureCollection", features: stellen });
-  setzeDaten("zuordnung", { type: "FeatureCollection", features: zuordnung });
-  setzeDaten("schnapp", { type: "FeatureCollection", features: schnapp });
   const s = state.byId.get(state.auswahl);
+  setzeDaten("auswahl", { type: "FeatureCollection", features: s ? [linkLinie(s, 1), punkt(s, 1)].filter(Boolean) : [] });
   const kand = s ? state.ergebnisse.get(s.id)?.kandidaten ?? [] : [];
   const cur = s ? linkVon(s)?.id : null;
   setzeDaten("kandidaten", {
@@ -279,8 +331,13 @@ function farbenNeu() {
   set("schnapp-linie", "line-color", lageFarbe());
   set("kandidaten-rang", "text-color", css("--fg"));
   set("kandidaten-rang", "text-halo-color", halo());
-  set("stellen-kreis", "circle-color", lageFarbe());
-  set("stellen-kreis", "circle-stroke-color", ["case", ["==", ["get", "sel"], 1], css("--fg"), halo()]);
+  for (const id of ["stellen-kreis", "auswahl-kreis"]) {
+    set(id, "circle-color", kreisFarbe());
+    set(id, "circle-stroke-color", kreisRand());
+  }
+  for (const id of ["stellen-pfeil", "auswahl-pfeil"]) set(id, "icon-color", pfeilFarbe());
+  set("auswahl-linie", "line-color", lageFarbe());
+  set("arme-linie", "line-color", css("--muted"));
   if (map.getLayer("bg")) map.setPaintProperty("bg", "background-color", css("--map-bg"));
 }
 
@@ -517,6 +574,7 @@ async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = nu
   state.ergebnisse.clear();
   state.wahl.clear();
   state.stellen = [];
+  stand++;
   state.byId.clear();
   state.bereich = null;
   state.auswahl = null;
@@ -939,6 +997,7 @@ function updateLink() {
     if (!n.info?.crsAusDatei) p.set("crs", n.info?.crs ?? $("crs").value.trim());
   }
   if (DATEN !== STANDARD_DATEN) p.set("daten", DATEN);
+  if (params.has("debug")) p.set("debug", "");
   const q = p.toString().replace(/%2F/g, "/").replace(/%3A/g, ":");
   history.replaceState(null, "", q ? `?${q}` : location.pathname);
 }
@@ -962,7 +1021,320 @@ async function ladeDaten() {
   }
 }
 
-/** Die Stellen im Gebiet des Netzes, die eine Richtung zählen und aus einer Quelle mit Lizenz stammen. */
+// ---------- Kurzzeitzählungen der Zählkarte ----------
+async function holeJson(pfad) {
+  const res = await fetch(`${DATEN}${pfad}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+/** manifest.json und index.json, einmal je Sitzung; danach weiß die Seite, ob es Ströme gibt. */
+function ladeKurz() {
+  const k = state.kurz;
+  if (k.manifest && k.stellen) return Promise.resolve(true);
+  k.laedt ??= (async () => {
+    try {
+      setStatus("Kurzzeitzählungen der Zählkarte laden …");
+      k.manifest = leseManifest(await holeJson("manifest.json"));
+      if (!k.manifest.muster) throw new Error("Diese Daten der Zählkarte enthalten noch keine Werte je Strom (stroeme/, ab zaehlkarte#45)");
+      k.stellen = leseStellen(await holeJson(k.manifest.index));
+      k.fehler = null;
+      return true;
+    } catch (err) {
+      k.manifest = null;
+      k.stellen = null;
+      k.fehler = err;
+      return false;
+    } finally {
+      k.laedt = null;
+    }
+  })();
+  return k.laedt;
+}
+
+/** Die Ströme einer Quelle in einem Jahr, je Datei einmal. */
+function kurzDatei(quelle, jahr) {
+  const key = `${quelle}-${jahr}`;
+  if (!state.kurz.dateien.has(key)) {
+    const p = holeJson(stroemePfad(state.kurz.manifest, quelle, jahr)).then((json) => {
+      if (json.version !== STROEME_VERTRAG) console.warn(`${key}: Ströme in Version ${json.version}, gebaut ist die Seite für ${STROEME_VERTRAG}`);
+      return json;
+    });
+    state.kurz.dateien.set(key, p);
+    p.catch(() => state.kurz.dateien.delete(key));
+  }
+  return state.kurz.dateien.get(key);
+}
+
+// Lizenzen mit Weitergabe unter gleichen Bedingungen (CC BY-SA): Ihre Bedingungen gingen auf die ganze
+// counts-kurzzeit.xml über. Lieferungen unter ihnen sind aus, bis man sie einschaltet (Berlin 1990–2019).
+const WEITERGABE = /\bSA\b/;
+
+/** Der Lizenzeintrag einer Lieferung; ohne Angabe der erste der Quelle außer der Lage. */
+function lieferungVon(quelle, code) {
+  const q = state.kurz.manifest?.quellen.get(quelle);
+  if (!q) return null;
+  return (code != null ? q.lizenzen.get(code) : null) ?? [...q.lizenzen.values()].find((l) => l.code !== "lage") ?? null;
+}
+/** Ob Zählungen einer Lieferung dabei sind: wie gewählt, sonst alle außer denen mit Weitergabe unter gleichen Bedingungen. */
+function lieferungAn(quelle, l) {
+  const wahl = state.kurz.opts.lieferungen?.[`${quelle}:${l.code}`];
+  return wahl ?? !WEITERGABE.test(l.lizenz ?? "");
+}
+
+/**
+ * Die Kurzzeit-Punkte im Gebiet des Netzes: je Stelle und Gruppe die jüngste passende Zählung
+ * (lib/kurzzeit.js), daraus die Punkte der Arme und Fahrtrichtungen, als Stellen der Familie „kurz“.
+ */
+async function kurzStellen([w, s, o, n]) {
+  const k = state.kurz;
+  if (!k.an) {
+    k.info = null;
+    return [];
+  }
+  if (!(await ladeKurz())) {
+    k.info = { fehler: k.fehler };
+    return [];
+  }
+  const rand = 0.002;
+  const imGebiet = new Set();
+  const quellen = new Set();
+  for (const st of k.stellen.values()) {
+    if (st.lon >= w - rand && st.lon <= o + rand && st.lat >= s - rand && st.lat <= n + rand) {
+      imGebiet.add(st.id);
+      quellen.add(st.quelle);
+    }
+  }
+  const opts = k.opts;
+  const dateien = [];
+  for (const q of quellen) {
+    for (const j of k.manifest.jahre.get(q) ?? []) {
+      if ((opts.vonJahr == null || j >= opts.vonJahr) && (opts.bisJahr == null || j <= opts.bisJahr)) dateien.push([q, j]);
+    }
+  }
+  const eintraege = [];
+  let fertig = 0;
+  let fehlerJahre = 0;
+  await Promise.all(dateien.map(async ([q, j]) => {
+    try {
+      const json = await kurzDatei(q, j);
+      for (const [kennung, z] of Object.entries(json.zaehlungen ?? {})) eintraege.push({ quelle: json.quelle ?? q, kennung, z });
+    } catch {
+      fehlerJahre++;
+    }
+    fertig++;
+    setStatus(`Kurzzeitzählungen laden … ${de(fertig)} von ${de(dateien.length)} Jahren`, "busy", (100 * fertig) / Math.max(1, dateien.length));
+  }));
+  // erst die Lieferungen, dann je Stelle die jüngste: Ist die jüngste aus einer abgewählten, gilt die davor
+  const aus = new Map();
+  const erlaubt = eintraege.filter((e) => {
+    if (!imGebiet.has(e.z.stelle)) return false;
+    const l = lieferungVon(e.quelle, e.z.lieferung);
+    if (l && lieferungAn(e.quelle, l)) return true;
+    const key = l ? `${l.lizenz} (${l.titel ?? l.code})` : "ohne Lieferung";
+    aus.set(key, (aus.get(key) ?? 0) + 1);
+    return false;
+  });
+  const gewaehlt = waehleZaehlungen(erlaubt, opts, imGebiet);
+  const info = { gebiet: imGebiet.size, dateien: dateien.length, fehlerJahre, zaehlungen: gewaehlt.length, knoten: new Set(), querschnitte: new Set(), ohneWinkel: 0, ohneRichtung: 0, ohneLizenz: 0, stellen: new Set(), ausLieferung: aus };
+  const out = [];
+  for (const a of gewaehlt) {
+    const st = k.stellen.get(a.z.stelle);
+    if (!st) continue;
+    const r = kurzPunkte(st, a, { abstand: opts.abstand });
+    info.ohneWinkel += r.ohneWinkel;
+    for (const p of r.punkte) {
+      const liz = lizenzenVon(k.manifest, p);
+      if (!liz.ok) {
+        info.ohneLizenz++;
+        continue;
+      }
+      out.push(kurzStelle(p, liz));
+      info.stellen.add(p.stelle);
+      if (p.grad == null) info.ohneRichtung++;
+    }
+    if (r.punkte.length) info[r.punkte[0].art === "knoten" ? "knoten" : "querschnitte"].add(st.id);
+  }
+  info.punkte = out.length;
+  k.info = info;
+  return out;
+}
+
+const WOCHENTAG_KURZ = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+const datumText = (iso) => {
+  if (!iso) return "";
+  const [j, m, t] = iso.split("-");
+  return `${WOCHENTAG_KURZ[wochentag(tagNr(iso))]} ${t}.${m}.${j}`;
+};
+const armText = (arm) => `Arm ${arm.nr}${arm.name ? ` „${arm.name}“` : ""}`;
+
+/** Ein Punkt aus lib/kurzzeit.js als Stelle der Liste, der Karte und der Zuordnung. */
+function kurzStelle(p, liz) {
+  const knoten = p.art === "knoten";
+  const seite = knoten ? (p.seite === "zu" ? "Zufahrt" : "Ausfahrt") : "Richtung";
+  const gruppen = KURZ_GRUPPEN.filter((g) => p.werte[g]);
+  const modi = [...new Set(gruppen.flatMap((g) => state.gruppen[g].link.split(/[,\s]+/).map((m) => m.trim().toLowerCase()).filter(Boolean)))];
+  return {
+    id: p.id,
+    familie: "kurz",
+    quelle: p.quelle,
+    name: p.name,
+    abschnitt: knoten ? `${seite} Arm ${p.arm.nr}` : `Richtung Arm ${p.arm.nr}`,
+    richtungText: knoten ? `${seite} ${p.seite === "zu" ? "aus" : "in"} ${armText(p.arm)}` : `Richtung ${armText(p.arm)}${p.vonArme.length === 1 ? ` (von ${armText(p.vonArme[0])})` : ""}`,
+    r: { art: "gerichtet", grad: p.grad, ziel: p.grad == null ? armText(p.arm) : null },
+    lon: p.lon,
+    lat: p.lat,
+    gruppen,
+    aktiv: gruppen,
+    modi,
+    land: null,
+    chunk: null,
+    suchName: p.suchName,
+    // ein Arm-Punkt sucht nur bis kurz vor den Knoten, sonst fände er die Links der anderen Arme
+    radius: knoten ? Math.max(5, state.kurz.opts.abstand - 5) : null,
+    rueckfall: false,
+    lizenz: liz,
+    kurz: p,
+  };
+}
+
+// ---------- Einstellungen der Kurzzeitzählungen ----------
+const kurzSpeichern = () => store.set("snapper.kurz", JSON.stringify({ an: state.kurz.an, opts: state.kurz.opts }));
+
+/** Formular aus den Einstellungen; Wochentage und Gruppen als Knöpfe. */
+function renderKurz() {
+  const k = state.kurz;
+  const o = k.opts;
+  $("kurz-an").checked = k.an;
+  $("kurz-felder").classList.toggle("off", !k.an);
+  $("kurz-von").value = o.vonJahr ?? "";
+  $("kurz-bis").value = o.bisJahr ?? "";
+  if (k.manifest) {
+    const alle = [...k.manifest.jahre.values()].flat();
+    if (alle.length) $("kurz-bis").placeholder = String(Math.max(...alle));
+  }
+  $("kurz-stunden").value = o.minStunden;
+  $("kurz-abstand").value = o.abstand;
+  for (const c of document.querySelectorAll(".kurz-tag")) c.checked = o.tage.includes(c.value);
+  $("kurz-wochentage").replaceChildren(...WOCHENTAGE.map((w) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.value = String(w.nr);
+    b.textContent = w.kurz;
+    b.setAttribute("aria-pressed", String(o.wochentage.includes(w.nr)));
+    return b;
+  }));
+  const lieferungen = [];
+  for (const [code, q] of k.manifest?.quellen ?? []) {
+    if (!k.manifest.jahre.get(code)?.length) continue;
+    for (const l of q.lizenzen.values()) if (l.code !== "lage" && l.lizenz && !l.ohneLizenz) lieferungen.push([q, l]);
+  }
+  $("kurz-lieferungen-feld").hidden = !lieferungen.length;
+  $("kurz-lieferungen").replaceChildren(...lieferungen.map(([q, l]) => {
+    const el = document.createElement("label");
+    el.className = "check";
+    el.innerHTML = `<input type="checkbox" class="kurz-lieferung" value="${esc(`${q.code}:${l.code}`)}"${lieferungAn(q.code, l) ? " checked" : ""}><span>${esc(q.name)}: ${esc(l.titel ?? l.code)} <small class="hint">· ${esc(l.lizenz)}${WEITERGABE.test(l.lizenz) ? ", Weitergabe unter gleichen Bedingungen" : ""}</small></span>`;
+    return el;
+  }));
+  const namen = k.manifest?.gruppenNamen ?? { kfz: "Kfz", sv: "Schwerverkehr", rad: "Rad", fuss: "Fuß" };
+  $("kurz-gruppen").replaceChildren(...KURZ_GRUPPEN.map((g) => {
+    const l = document.createElement("label");
+    l.className = "check";
+    l.innerHTML = `<input type="checkbox" class="kurz-gruppe" value="${g}"${o.gruppen.includes(g) ? " checked" : ""}>${esc(namen[g] ?? g)} <small class="hint">→ ${esc(state.gruppen[g].mode)}</small>`;
+    return l;
+  }));
+  renderKurzStats();
+}
+
+const KURZ_TEXT = $("kurz-text").innerHTML;
+
+/** Was die Auswahl der Kurzzeitzählungen ergab, im Kopf und unter dem Schalter. */
+function renderKurzStats() {
+  const k = state.kurz;
+  const sum = $("kurz-sum");
+  const t = $("kurz-text");
+  const i = k.info;
+  if (!k.an || !i) {
+    sum.textContent = k.an ? "an" : "aus";
+    t.innerHTML = KURZ_TEXT;
+    return;
+  }
+  if (i.fehler) {
+    sum.textContent = "nicht verfügbar";
+    t.innerHTML = `Die Kurzzeitzählungen ließen sich nicht laden (${esc(reason(i.fehler))}). Adresse: <code>${esc(DATEN)}manifest.json</code>`;
+    return;
+  }
+  const mitLink = state.stellen.filter((s) => familieVon(s) === "kurz" && linkVon(s)).length;
+  sum.textContent = `${de(i.punkte)} Punkte`;
+  const teile = [`Zählkarte vom ${esc(k.manifest.erzeugt ?? "?")}: Im Gebiet des Netzes liegen ${de(i.gebiet)} Stellen mit Kurzzeitzählungen; ${de(i.stellen.size)} davon haben eine passende Zählung (${de(i.knoten.size)} Knoten, ${de(i.querschnitte.size)} Querschnitte). Das ergibt ${de(i.punkte)} Punkte${state.netz && state.ergebnisse.size ? `, ${de(mitLink)} mit Link` : ""}.`];
+  if (i.ohneWinkel) teile.push(`${de(i.ohneWinkel)} Zu- oder Ausfahrten an Armen ohne Winkel bleiben draußen.`);
+  if (i.ohneRichtung) teile.push(`${de(i.ohneRichtung)} Fahrtrichtungen an Querschnitten ohne Winkel sind zum Prüfen markiert.`);
+  if (i.ohneLizenz) teile.push(`${de(i.ohneLizenz)} Punkte aus Lieferungen ohne Lizenz bleiben draußen.`);
+  for (const [was, n] of i.ausLieferung ?? []) teile.push(`${de(n)} Zählungen unter ${esc(was)} sind abgewählt.`);
+  if (i.fehlerJahre) teile.push(`<strong>${de(i.fehlerJahre)} von ${de(i.dateien)} Jahren ließen sich nicht laden.</strong>`);
+  t.innerHTML = teile.join(" ");
+}
+
+function leseKurzForm() {
+  const o = state.kurz.opts;
+  const jahr = (id) => {
+    const v = $(id).value.trim();
+    return v && Number.isInteger(Number(v)) ? Number(v) : null;
+  };
+  o.vonJahr = jahr("kurz-von");
+  o.bisJahr = jahr("kurz-bis");
+  o.tage = [...document.querySelectorAll(".kurz-tag")].filter((c) => c.checked).map((c) => c.value);
+  o.gruppen = [...document.querySelectorAll(".kurz-gruppe")].filter((c) => c.checked).map((c) => c.value);
+  o.minStunden = Math.max(1, Math.min(24, Number($("kurz-stunden").value) || KURZ_VORGABE.minStunden));
+  o.abstand = Math.max(10, Math.min(100, Number($("kurz-abstand").value) || KURZ_VORGABE.abstand));
+}
+
+/** Nach einer Änderung: speichern und die Stellen neu wählen, wenn ein Netz da ist. */
+function kurzGeaendert() {
+  kurzSpeichern();
+  renderKurz();
+  if (state.netz) waehleStellen();
+}
+
+$("kurz-an").addEventListener("change", (e) => {
+  state.kurz.an = e.target.checked;
+  if (state.kurz.an) $("kurz").open = true;
+  kurzGeaendert();
+});
+for (const id of ["kurz-von", "kurz-bis", "kurz-stunden", "kurz-abstand"]) {
+  $(id).addEventListener("change", () => {
+    leseKurzForm();
+    if (state.kurz.an) kurzGeaendert();
+    else kurzSpeichern();
+  });
+}
+$("kurz-felder").addEventListener("change", (e) => {
+  if (e.target.matches(".kurz-lieferung")) {
+    state.kurz.opts.lieferungen = { ...state.kurz.opts.lieferungen, [e.target.value]: e.target.checked };
+    if (state.kurz.an) kurzGeaendert();
+    else kurzSpeichern();
+    return;
+  }
+  if (!e.target.matches(".kurz-tag, .kurz-gruppe")) return;
+  leseKurzForm();
+  if (state.kurz.an) kurzGeaendert();
+  else kurzSpeichern();
+});
+$("kurz-wochentage").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  const nr = Number(b.value);
+  const w = state.kurz.opts.wochentage;
+  state.kurz.opts.wochentage = w.includes(nr) ? w.filter((x) => x !== nr) : [...w, nr];
+  if (state.kurz.an) kurzGeaendert();
+  else {
+    kurzSpeichern();
+    renderKurz();
+  }
+});
+
+let waehlToken = 0;
+/** Die Stellen im Gebiet des Netzes, die eine Richtung zählen und aus einer Quelle mit Lizenz stammen, dazu die Kurzzeit-Punkte. */
 async function waehleStellen() {
   const d = state.daten;
   const n = state.netz;
@@ -992,10 +1364,18 @@ async function waehleStellen() {
     const gruppen = x.gruppen.filter((g) => state.gruppen[g]?.an);
     if (!gruppen.length) { gruende.gruppe++; continue; }
     const modi = [...new Set(gruppen.flatMap((g) => state.gruppen[g].link.split(/[,\s]+/).map((m) => m.trim().toLowerCase()).filter(Boolean)))];
-    gewaehlt.push({ ...x, aktiv: gruppen, modi });
+    gewaehlt.push({ ...x, familie: "dauer", aktiv: gruppen, modi });
   }
-  gewaehlt.sort((a, b) => a.id.localeCompare(b.id, "de", { numeric: true }));
-  state.bereich = { imGebiet: imGebiet.length, gruende, ohneLizenz: [...ohneLizenz] };
+  const t = ++waehlToken;
+  const kurze = await kurzStellen(n.info.bbox);
+  // inzwischen ein anderes Netz oder eine neuere Auswahl: die gilt
+  if (t !== waehlToken || n !== state.netz) return;
+  const ordnung = new Intl.Collator("de", { numeric: true });
+  gewaehlt.sort((a, b) => ordnung.compare(a.id, b.id));
+  kurze.sort((a, b) => ordnung.compare(a.id, b.id));
+  gewaehlt.push(...kurze);
+  state.bereich = { imGebiet: imGebiet.length, gruende, ohneLizenz: [...ohneLizenz], dauer: gewaehlt.length - kurze.length };
+  renderKurz();
   state.stellen = gewaehlt;
   state.byId = new Map(gewaehlt.map((x) => [x.id, x]));
   if (state.auswahl && !state.byId.has(state.auswahl)) state.auswahl = null;
@@ -1013,13 +1393,19 @@ function suchpunkt(s) {
   return a ? { lon: a.lon, lat: a.lat, grad: a.grad ?? s.r.grad } : { lon: s.lon, lat: s.lat, grad: s.r.grad };
 }
 
+/** Der Umkreis, in dem eine Stelle Links sucht: der allgemeine, bei Arm-Punkten höchstens bis kurz vor den Knoten. */
+const umkreisVon = (s) => {
+  const r = Number($("radius").value) || 50;
+  return s.radius != null ? Math.min(r, s.radius) : r;
+};
+
 async function suche() {
   const t = ++state.suchToken;
-  const stellen = state.stellen.map((s) => ({ id: s.id, ...suchpunkt(s), name: s.name, modi: s.modi }));
+  const stellen = state.stellen.map((s) => ({ id: s.id, ...suchpunkt(s), name: s.suchName ?? s.name, modi: s.modi, radius: umkreisVon(s), rueckfall: s.rueckfall }));
   if (!stellen.length) {
     state.ergebnisse.clear();
     nachSuche();
-    setStatus(`Im Gebiet des Netzes liegen keine passenden Dauerzählstellen.`, "idle");
+    setStatus(`Im Gebiet des Netzes liegen keine passenden Zählstellen.`, "idle");
     return;
   }
   setStatus(`Links zu ${de(stellen.length)} Zählstellen suchen …`);
@@ -1039,8 +1425,11 @@ function nachSuche() {
   verteileNeu();
   for (const id of ["s-stellen", "s-pruefen", "s-mitteln", "s-ausgeben"]) $(id).classList.toggle("inactive", !state.stellen.length);
   $("legend").hidden = !state.stellen.length;
+  $("legend-kurz").hidden = !state.stellen.some((s) => familieVon(s) === "kurz");
   const mit = state.stellen.filter((s) => linkVon(s)).length;
-  setStatus(`${de(state.stellen.length)} Zählstellen, ${de(mit)} davon mit Link. ${zaehle("pruefen") ? `${de(zaehle("pruefen"))} zum Prüfen.` : ""}`.trim(), "done");
+  const kurze = state.stellen.filter((s) => familieVon(s) === "kurz").length;
+  const wer = kurze ? `${de(state.stellen.length - kurze)} Dauerzählstellen und ${de(kurze)} Kurzzeit-Punkte` : `${de(state.stellen.length)} Zählstellen`;
+  setStatus(`${wer}, ${de(mit)} davon mit Link. ${zaehle("pruefen") ? `${de(zaehle("pruefen"))} zum Prüfen.` : ""}`.trim(), "done");
   renderAuswahl();
   renderMittelRahmen();
   mittleAlle();
@@ -1053,18 +1442,36 @@ function nachSuche() {
   }
 }
 
-/** Automatische Wahl neu: jeder Link nur einmal, Zuordnungen von Hand gehen vor, ausgelassene Stellen nehmen nichts. */
+/**
+ * Automatische Wahl neu: jeder Link je Verkehrsmittel nur einmal, Zuordnungen von Hand gehen vor,
+ * ausgelassene Stellen nehmen nichts. Erst die Dauerzählstellen, dann die Kurzzeit-Punkte auf den
+ * Links, die übrig sind: Je Link und Verkehrsmittel geht eine Dauerzählstelle vor.
+ */
 function verteileNeu() {
   const liste = state.stellen;
-  const fest = new Map();
-  const kandidaten = liste.map((s, idx) => {
-    const e = state.entscheid.get(s.id);
-    if (e?.link) fest.set(idx, e.link.i);
-    if (e?.aus) return [];
-    return state.ergebnisse.get(s.id)?.kandidaten ?? [];
-  });
-  const wahl = verteile(kandidaten, fest, liste.map(ausgabeModi));
-  state.wahl = new Map(liste.map((s, idx) => [s.id, wahl[idx]]));
+  lageCache.clear();
+  stand++;
+  state.wahl = new Map();
+  const belegt = new Map(); // Link-Index -> Set der Verkehrsmittel, die die Familien davor schon haben
+  for (const familie of ["dauer", "kurz"]) {
+    const teil = liste.filter((s) => familieVon(s) === familie);
+    if (!teil.length) continue;
+    const fest = new Map();
+    const kandidaten = teil.map((s, idx) => {
+      const e = state.entscheid.get(s.id);
+      if (e?.link) fest.set(idx, e.link.i);
+      if (e?.aus) return [];
+      return state.ergebnisse.get(s.id)?.kandidaten ?? [];
+    });
+    const wahl = verteile(kandidaten, fest, teil.map(ausgabeModi), belegt);
+    teil.forEach((s, idx) => state.wahl.set(s.id, wahl[idx]));
+    for (const s of teil) {
+      const l = linkVon(s);
+      if (!l) continue;
+      if (!belegt.has(l.i)) belegt.set(l.i, new Set());
+      for (const m of ausgabeModi(s)) belegt.get(l.i).add(m);
+    }
+  }
   // wer welchen Link hat: für die Gründe („vergeben an …“)
   state.inhaber = new Map();
   for (const s of liste) {
@@ -1073,11 +1480,26 @@ function verteileNeu() {
   }
 }
 
-/** Die anderen Stellen, die einen Link mit einem der Verkehrsmittel von `s` haben, als Text. */
-function inhaberText(linkId, s) {
+/**
+ * Die anderen Stellen, die einen Link mit einem der Verkehrsmittel von `s` haben und ihn `s`
+ * nehmen: für eine Dauerzählstelle die anderen Dauerzählstellen, für einen Kurzzeit-Punkt alle.
+ */
+function inhaberVon(linkId, s) {
   const modi = ausgabeModi(s);
-  const andere = (state.inhaber?.get(linkId) ?? []).filter((t) => t.id !== s.id && ausgabeModi(t).some((m) => modi.includes(m)));
-  return andere.map((t) => `${t.name || t.id} (${t.id})`).join(", ");
+  return (state.inhaber?.get(linkId) ?? []).filter((t) => t.id !== s.id && (familieVon(s) === "kurz" || familieVon(t) === "dauer") && ausgabeModi(t).some((m) => modi.includes(m)));
+}
+const stelleText = (t) => (familieVon(t) === "kurz" ? `${t.name || t.kurz.stelle} (${t.abschnitt}, ${t.kurz.stelle})` : `${t.name || t.id} (${t.id})`);
+
+/** Die Inhaber eines Links als Text; Dauerzählstellen beim Namen, weil sie vor Kurzzeit-Punkten gehen. */
+function inhaberText(linkId, s) {
+  const andere = inhaberVon(linkId, s);
+  const dauer = andere.filter((t) => familieVon(t) === "dauer");
+  const kurze = andere.filter((t) => familieVon(t) === "kurz");
+  const teile = [];
+  if (familieVon(s) === "kurz" && dauer.length) teile.push(`die Dauerzählstelle ${dauer.map(stelleText).join(", ")}, die vorgeht`);
+  else if (dauer.length) teile.push(dauer.map(stelleText).join(", "));
+  if (kurze.length) teile.push(kurze.map(stelleText).join(", "));
+  return teile.join("; ");
 }
 
 /** Die networkModes, die eine Stelle ausgibt; ein Link trägt je Verkehrsmittel nur eine Stelle. */
@@ -1105,16 +1527,21 @@ function gruendeVon(s) {
       return [...vorab, `Alle passenden Links im Umkreis sind an andere Stellen mit demselben Verkehrsmittel vergeben${an ? `, der nächste an ${an}` : ""}.`];
     }
     const u = state.ergebnisse.get(s.id)?.umkreis;
-    const r = Number($("radius").value) || 50;
-    if (!u?.links) return [`Im Umkreis von ${de(r)} m liegt kein Link.`];
-    if (!u.modus) return [`Im Umkreis liegen ${de(u.links)} Links, aber keiner erlaubt ${s.modi.join(" oder ")}. Hat das Netz dieses Verkehrsmittel? Sonst unter „Link erlaubt“ anpassen.`];
-    return [`Im Umkreis liegen ${de(u.modus)} Links mit ${s.modi.join(" oder ")}, aber keiner weicht höchstens ${de(Number($("winkel").value) || 60)}° von der Fahrtrichtung ab.`];
+    const r = umkreisVon(s);
+    const arm = familieVon(s) === "kurz" && s.kurz.art === "knoten" ? ` um den Punkt auf dem Arm (${de(state.kurz.opts.abstand)} m vom Knoten; gesucht wird bis kurz vor den Knoten, damit der Punkt nicht auf einen anderen Arm fällt)` : "";
+    if (!u?.links) return [...vorab, `Im Umkreis von ${de(r)} m${arm} liegt kein Link.${familieVon(s) === "kurz" ? " Hat das Netz diese Straße?" : ""}`];
+    if (!u.modus) return [...vorab, `Im Umkreis liegen ${de(u.links)} Links, aber keiner erlaubt ${s.modi.join(" oder ")}. Hat das Netz dieses Verkehrsmittel? Sonst unter „Link erlaubt“ anpassen.`];
+    return [...vorab, `Im Umkreis${arm} liegen ${de(u.modus)} Links mit ${s.modi.join(" oder ")}, aber keiner weicht höchstens ${de(Number($("winkel").value) || 60)}° von der Fahrtrichtung ab.`];
   }
   const out = [];
   const e = state.entscheid.get(s.id);
   if (e?.anker && !e.link) out.push(`Aus „${e.anker.netz ?? "einer Zuordnung"}“ nicht eindeutig übernommen (${e.anker.grund ?? "unklar"}). Gesucht wird vom übernommenen Punkt aus.`);
-  if (s.r.grad == null && !e?.anker) out.push(`Die Quelle nennt nur das Ziel („${s.r.ziel}“), keine Himmelsrichtung: Hin- oder Rückrichtung prüfen.`);
-  if (w.d > WEIT_M) out.push(`Der Link liegt ${de(w.d)} m ${e?.anker ? "vom übernommenen Punkt" : "von der Stelle"} entfernt.`);
+  if (s.r.grad == null && !e?.anker) {
+    out.push(familieVon(s) === "kurz"
+      ? `Die Zählung nennt für ${s.r.ziel} keinen Winkel: Hin- oder Rückrichtung prüfen.`
+      : `Die Quelle nennt nur das Ziel („${s.r.ziel}“), keine Himmelsrichtung: Hin- oder Rückrichtung prüfen.`);
+  }
+  if (w.d > WEIT_M) out.push(`Der Link liegt ${de(w.d)} m ${e?.anker ? "vom übernommenen Punkt" : familieVon(s) === "kurz" && s.kurz.art === "knoten" ? "vom Punkt auf dem Arm" : "von der Stelle"} entfernt.`);
   if (w.weit) out.push(`Kein Link liegt innerhalb von ${de(Number($("winkel").value) || 60)}° der genannten Richtung (${kurz(s.r.grad)}). Dieser weicht ${de(w.abweichung)}° ab, liegt aber näher an ihr als seine Gegenrichtung – die Quelle nennt wohl nur eine grobe Himmelsrichtung.`);
   else if (w.abweichung != null && w.abweichung > WINKEL_PRUEFEN) out.push(`Die Richtung des Links weicht um ${de(w.abweichung)}° ab.`);
   if (k[0] && k[0].i !== w.i) {
@@ -1124,12 +1551,20 @@ function gruendeVon(s) {
   return out;
 }
 
+// Die Lage jeder Stelle, bis die Zuordnung sich ändert (verteileNeu): Bei Tausenden von
+// Kurzzeit-Punkten fragen Liste, Filter und Karte sonst bei jedem Zeichnen alle Gründe neu ab.
+const lageCache = new Map();
 function lageVon(s) {
   const e = state.entscheid.get(s.id);
   if (e?.aus) return "aus";
   if (e?.link) return "geprueft";
   if (!state.wahl.get(s.id)) return "ohne";
-  return gruendeVon(s).length ? "pruefen" : "passt";
+  let lage = lageCache.get(s.id);
+  if (lage === undefined) {
+    lage = gruendeVon(s).length ? "pruefen" : "passt";
+    lageCache.set(s.id, lage);
+  }
+  return lage;
 }
 const zaehle = (lage) => state.stellen.filter((s) => lageVon(s) === lage).length;
 /** Die Richtung einer Stelle in Worten; steht sie nur im Namen oder in der Kennung, mit Hinweis. */
@@ -1209,11 +1644,17 @@ async function nimmLink(id, { i, link = null }) {
   const modi = ausgabeModi(s);
   for (const [andere, e] of state.entscheid) {
     const t = state.byId.get(andere);
-    // ein Link trägt eine Kfz- und eine Rad-Stelle; nur wer dasselbe Verkehrsmittel ausgibt, muss weichen
-    if (andere !== id && e.link?.id === link.id && (!t || ausgabeModi(t).some((m) => modi.includes(m)))) {
+    // ein Link trägt eine Kfz- und eine Rad-Stelle; nur wer dasselbe Verkehrsmittel ausgibt, muss
+    // weichen, und nur in derselben Familie: Dauer- und Kurzzeitzählungen gehen in eigene Dateien
+    const gleicheFamilie = (t ? familieVon(t) : familieVonId(andere)) === familieVon(s);
+    if (andere !== id && e.link?.id === link.id && gleicheFamilie && (!t || ausgabeModi(t).some((m) => modi.includes(m)))) {
       e.link = null;
       meldung += ` ${t?.name || andere} hatte ihn und sucht neu.`;
     }
+  }
+  if (familieVon(s) === "kurz") {
+    const dauer = (state.inhaber?.get(link.id) ?? []).filter((t) => familieVon(t) === "dauer" && ausgabeModi(t).some((m) => modi.includes(m)));
+    if (dauer.length) meldung += ` Auf dem Link liegt auch ${dauer.map(stelleText).join(", ")}; beide gehen in ihre eigene Datei.`;
   }
   const e = entscheid(id);
   e.link = link;
@@ -1249,13 +1690,17 @@ function zuruecksetzen(id) {
   } else geaendert();
 }
 
-/** Zwei Stellen ohne Himmelsrichtung am selben Ort tauschen ihre Links. */
+/** Zwei Stellen ohne Himmelsrichtung am selben Ort tauschen ihre Links; bei Kurzzeitzählungen die beiden Richtungen einer Zählung. */
 function partnerVon(s) {
   if (s.r.grad != null) return null;
+  if (familieVon(s) === "kurz") {
+    const andere = state.stellen.filter((t) => familieVon(t) === "kurz" && t.id !== s.id && t.r.grad == null && t.kurz.kennung === s.kurz.kennung && t.kurz.stelle === s.kurz.stelle);
+    return andere.length === 1 ? andere[0] : null;
+  }
   let best = null;
   let bestD = 40; // m
   for (const t of state.stellen) {
-    if (t.id === s.id || t.quelle !== s.quelle || t.r.grad != null) continue;
+    if (t.id === s.id || familieVon(t) !== "dauer" || t.quelle !== s.quelle || t.r.grad != null) continue;
     const d = Math.hypot((t.lon - s.lon) * 111320 * Math.cos((s.lat * Math.PI) / 180), (t.lat - s.lat) * 110540);
     if (d < bestD) [best, bestD] = [t, d];
   }
@@ -1299,7 +1744,7 @@ function waehle(id, { fliegen = true } = {}) {
   state.auswahl = id;
   const s = state.byId.get(id);
   if (s && fliegen) map.flyTo({ center: [s.lon, s.lat], zoom: Math.max(map.getZoom(), 16.5), duration: 600 });
-  if (s && !state.stunden.has(id)) ladeStunden([s]).then(() => state.auswahl === id && renderKarte());
+  if (s && familieVon(s) === "dauer" && !state.stunden.has(id)) ladeStunden([s]).then(() => state.auswahl === id && renderKarte());
   renderListe();
   renderKarte();
   zeichneDaten();
@@ -1308,7 +1753,7 @@ function waehle(id, { fliegen = true } = {}) {
 }
 
 function naechste() {
-  const liste = state.stellen.filter((s) => lageVon(s) === "pruefen" || lageVon(s) === "ohne");
+  const liste = state.stellen.filter((s) => familiePasst(s) && (lageVon(s) === "pruefen" || lageVon(s) === "ohne"));
   if (!liste.length) return setStatus("Nichts mehr zu prüfen.", "done");
   const at = liste.findIndex((s) => s.id === state.auswahl);
   waehle(liste[(at + 1) % liste.length].id);
@@ -1349,9 +1794,11 @@ function renderStats() {
   const b = state.bereich;
   $("auswahl-stats").hidden = !b;
   if (!b) return;
+  const dauer = state.stellen.filter((s) => familieVon(s) === "dauer");
   $("st-gebiet").textContent = de(b.imGebiet);
-  $("st-gerichtet").textContent = de(state.stellen.length);
-  $("st-link").textContent = de(state.stellen.filter((s) => linkVon(s)).length);
+  $("st-gerichtet").textContent = de(dauer.length);
+  $("st-link").textContent = de(dauer.filter((s) => linkVon(s)).length);
+  renderKurzStats();
 }
 
 function renderAuswahl() {
@@ -1372,7 +1819,7 @@ function renderGruppen() {
   const d = state.daten;
   if (!d) return;
   const body = $("gruppen-body");
-  const zaehler = Object.fromEntries(GRUPPEN.map((g) => [g, state.stellen.filter((s) => s.gruppen.includes(g)).length]));
+  const zaehler = Object.fromEntries(GRUPPEN.map((g) => [g, state.stellen.filter((s) => familieVon(s) === "dauer" && s.gruppen.includes(g)).length]));
   body.replaceChildren(...GRUPPEN.map((g) => {
     const cfg = state.gruppen[g];
     const tr = document.createElement("tr");
@@ -1380,7 +1827,7 @@ function renderGruppen() {
     tr.innerHTML = `<td><label class="check"><input type="checkbox" data-g="${g}" data-f="an"${cfg.an ? " checked" : ""}>${esc(d.gruppenNamen[g] ?? g)}</label></td>
       <td><input type="text" data-g="${g}" data-f="mode" value="${esc(cfg.mode)}" spellcheck="false" aria-label="networkMode für ${esc(g)}"></td>
       <td><input type="text" data-g="${g}" data-f="link" value="${esc(cfg.link)}" spellcheck="false" aria-label="Modi, die der Link erlauben muss, für ${esc(g)}"></td>
-      <td class="n">${state.stellen.length ? de(zaehler[g]) : ""}</td>`;
+      <td class="n">${state.bereich?.dauer ? de(zaehler[g]) : ""}</td>`;
     return tr;
   }));
 }
@@ -1392,6 +1839,7 @@ $("gruppen-body").addEventListener("change", (e) => {
   if (el.dataset.f === "an") cfg.an = el.checked;
   else cfg[el.dataset.f] = el.value.trim();
   store.set("snapper.gruppen", JSON.stringify(state.gruppen));
+  renderKurz();
   if (el.dataset.f === "mode") {
     verteileNeu();
     mittleAlle();
@@ -1409,10 +1857,31 @@ const FILTER = [
   ["geprueft", "Geprüft"],
   ["aus", "Ausgelassen"],
 ];
+const FAMILIEN = [
+  ["alle", "Alle"],
+  ["dauer", "Dauer"],
+  ["kurz", "Kurzzeit"],
+];
+const familiePasst = (s) => state.familie === "alle" || familieVon(s) === state.familie;
 function renderFilter() {
+  const kurze = state.stellen.filter((s) => familieVon(s) === "kurz").length;
+  const fam = $("familie");
+  fam.hidden = !kurze;
+  if (!kurze && state.familie !== "alle") state.familie = "alle";
+  fam.replaceChildren(...FAMILIEN.map(([wert, text]) => {
+    const n = wert === "alle" ? state.stellen.length : wert === "kurz" ? kurze : state.stellen.length - kurze;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(state.familie === wert));
+    b.value = wert;
+    b.innerHTML = `${text}<span>${de(n)}</span>`;
+    return b;
+  }));
   const box = $("filter");
+  const teil = state.stellen.filter(familiePasst);
   box.replaceChildren(...FILTER.map(([wert, text]) => {
-    const n = wert === "alle" ? state.stellen.length : zaehle(wert);
+    const n = wert === "alle" ? teil.length : teil.filter((s) => lageVon(s) === wert).length;
     const b = document.createElement("button");
     b.type = "button";
     b.setAttribute("role", "radio");
@@ -1430,20 +1899,34 @@ $("filter").addEventListener("click", (e) => {
   renderFilter();
   renderListe();
 });
+$("familie").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  state.familie = b.value;
+  renderFilter();
+  renderListe();
+});
 
-const sichtbare = () => state.stellen.filter((s) => state.filter === "alle" || lageVon(s) === state.filter);
+const sichtbare = () => state.stellen.filter((s) => familiePasst(s) && (state.filter === "alle" || lageVon(s) === state.filter));
+
+/** Die zweite Zeile eines Eintrags: Richtung und Kennung, bei Kurzzeit-Punkten dazu der Tag der Zählung. */
+const listenText = (s) => (familieVon(s) === "kurz" ? `${s.richtungText} · ${datumText(s.kurz.datum)} · ${s.kurz.stelle}` : `${richtungsText(s)} · ${s.id}`);
 
 function renderListe() {
   const ul = $("liste");
-  const liste = sichtbare();
-  if (!liste.length) {
+  const alle = sichtbare();
+  if (!alle.length) {
     const li = document.createElement("li");
     li.className = "empty";
     li.textContent = state.stellen.length ? "Keine Stellen in dieser Auswahl." : "Noch keine Zählstellen.";
     ul.replaceChildren(li);
     return;
   }
-  ul.replaceChildren(...liste.map((s) => {
+  // mit Kurzzeitzählungen werden es schnell Tausende: die Liste zeigt die ersten, die gewählte immer
+  let liste = alle.slice(0, KURZ_LISTE_MAX);
+  const sel = state.byId.get(state.auswahl);
+  if (sel && alle.length > KURZ_LISTE_MAX && !liste.includes(sel) && alle.includes(sel)) liste = [sel, ...liste];
+  const items = liste.map((s) => {
     const lage = lageVon(s);
     const link = linkVon(s);
     const li = document.createElement("li");
@@ -1451,13 +1934,20 @@ function renderListe() {
     b.type = "button";
     b.dataset.id = s.id;
     b.setAttribute("aria-current", String(s.id === state.auswahl));
-    b.innerHTML = `<span class="dot" style="--c: var(${LAGE_FARBE[lage]})" title="${esc(LAGE_TEXT[lage])}"></span>
+    b.innerHTML = `<span class="dot${familieVon(s) === "kurz" ? " ring" : ""}" style="--c: var(${LAGE_FARBE[lage]})" title="${esc(LAGE_TEXT[lage])}${familieVon(s) === "kurz" ? ", Kurzzeitzählung" : ""}"></span>
       <span class="t">${esc(s.name || s.id)} <small>${esc(s.abschnitt ?? "")}</small></span>
       <span class="m">${link?.d != null ? `${de(link.d)} m` : "–"}</span>
-      <span class="s">${esc(richtungsText(s))} · ${esc(s.id)}</span>`;
+      <span class="s">${esc(listenText(s))}</span>`;
     li.append(b);
     return li;
-  }));
+  });
+  if (alle.length > liste.length) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = `… und ${de(alle.length - liste.length)} weitere. Mit den Filtern eingrenzen, „Nächste zum Prüfen“ nehmen oder auf der Karte wählen.`;
+    items.push(li);
+  }
+  ul.replaceChildren(...items);
 }
 $("liste").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-id]");
@@ -1493,29 +1983,86 @@ function profilSvg(s) {
   return `<svg class="profil" viewBox="0 0 ${W} ${H}" role="img" aria-label="Tagesgang der Stelle"><text x="0" y="9">${de(max)} Fz/h</text>${bars}${ticks}</svg><div class="legende-profil">${leg}</div>`;
 }
 
+const lizenzLink = (l) => (l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.lizenz)}</a>` : esc(l.lizenz));
+
+/** Die gezählten Stunden eines Kurzzeit-Punkts als Balken, je Gruppe; nicht gezählte Stunden bleiben leer. */
+function profilKurzSvg(s) {
+  const p = s.kurz;
+  const gruppen = s.aktiv.filter((g) => p.werte[g]?.some((v) => v != null));
+  if (!gruppen.length) return "";
+  const W = 360;
+  const H = 92;
+  const unten = 14;
+  const breit = W / 24;
+  const balken = breit / gruppen.length - 1;
+  const max = Math.max(1, ...gruppen.flatMap((g) => p.werte[g].filter((v) => v != null)));
+  let bars = "";
+  gruppen.forEach((g, gi) => {
+    p.werte[g].forEach((v, k) => {
+      const h = p.h0 + k;
+      if (v == null || h < 0 || h > 23) return;
+      const hoehe = ((H - unten - 4) * v) / max;
+      bars += `<rect x="${(h * breit + gi * (balken + 1)).toFixed(1)}" y="${(H - unten - hoehe).toFixed(1)}" width="${balken.toFixed(1)}" height="${hoehe.toFixed(1)}" fill="${GRUPPE_FARBE[g] ?? "#888"}"><title>${g} ${h}–${h + 1} Uhr: ${de(v)}</title></rect>`;
+    });
+  });
+  const ticks = [0, 6, 12, 18, 23].map((h) => `<text x="${(h * breit + breit / 2).toFixed(1)}" y="${H - 2}" text-anchor="middle">${h}</text>`).join("");
+  const namen = state.kurz.manifest?.gruppenNamen ?? {};
+  const leg = gruppen.map((g) => {
+    const n = p.werte[g].filter((v) => v != null).length;
+    const summe = p.werte[g].reduce((a, v) => a + (v ?? 0), 0);
+    return `<span><i style="--c:${GRUPPE_FARBE[g]}"></i>${esc(namen[g] ?? g)} → ${esc(state.gruppen[g].mode)}: ${de(n)} gezählte Stunden, Summe ${de(summe)}</span>`;
+  }).join("");
+  return `<svg class="profil" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gezählte Stunden"><text x="0" y="9">${de(max)} Fz/h</text>${bars}${ticks}</svg><div class="legende-profil">${leg}</div><p class="note">Ein gezählter Tag, nur die gezählten Stunden (${esc(p.fenster)} Uhr): kein Mittel, keine Hochrechnung.</p>`;
+}
+
+/** Kopf der Karte einer Kurzzeit-Stelle: Zählung, Tag, Lizenz, Lage. */
+function kopfKurz(s) {
+  const p = s.kurz;
+  const q = state.kurz.manifest?.quellen.get(p.quelle);
+  const namen = state.kurz.manifest?.gruppenNamen ?? {};
+  const liz = [s.lizenz.lieferung, s.lizenz.lage].filter(Boolean);
+  const lage = p.lage === "geokodiert" ? "Lage aus OpenStreetMap geokodiert (Straßenkreuzung): Der Punkt kann an der Kreuzung liegen statt an der Zählstelle." : p.lage === "uebertragen" ? "Lage von anderen Zählungen derselben Stelle übertragen." : null;
+  const stroeme = p.stroeme.map(([a, b]) => `${a}→${b}`).join(", ");
+  return `
+    <div><h3>${esc(s.name || p.stelle)}</h3><p class="sub">${esc(s.richtungText)}</p></div>
+    <div class="meta">${kompassSvg(s.r.grad)}<span>${s.r.grad != null ? `${kurz(s.r.grad)} ${de(s.r.grad)}°` : "ohne Richtung"}</span>·<span>${p.art === "knoten" ? `Knoten, Punkt ${de(state.kurz.opts.abstand)} m auf dem Arm` : "Querschnitt"}</span>·<span title="Ströme von Arm nach Arm">Ströme ${esc(stroeme)}</span></div>
+    <div class="meta"><span class="chip">Kurzzeitzählung</span><span>${esc(datumText(p.datum))}</span>·<span>${esc(TAGTYP[p.tag ?? "u"] ?? "")}</span>·<span>${esc(p.fenster)} Uhr</span>${p.intervall ? `·<span>${esc(p.intervall)}-Minuten-Werte</span>` : ""}</div>
+    <div class="meta"><span>${esc(p.stelle)}</span>·<span>${esc(p.kennung)}</span>·<span>${esc(q?.name ?? p.quelle)}</span>·<span>${liz.map(lizenzLink).join(", ")}</span>·<span>${s.aktiv.map((g) => esc(namen[g] ?? g)).join(", ")}</span></div>
+    ${lage ? `<p class="note">${esc(lage)}</p>` : ""}
+    ${p.andere.length ? `<p class="note">Am selben Tag gibt es hier ${p.andere.length === 1 ? "eine weitere Zählung" : "weitere Zählungen"} (${esc(p.andere.join(", "))}), etwa zu anderen Stunden oder auf dem anderen Gehweg; sie ${p.andere.length === 1 ? "bleibt" : "bleiben"} draußen.</p>` : ""}`;
+}
+
 function renderKarte() {
   const box = $("karte");
   const s = state.byId.get(state.auswahl);
   box.hidden = !s;
   if (!s) return;
-  const q = state.daten.quellen.get(s.quelle);
+  const kurzPunkt = familieVon(s) === "kurz";
+  const q = kurzPunkt ? null : state.daten.quellen.get(s.quelle);
   const lage = lageVon(s);
   const link = linkVon(s);
   const e = state.entscheid.get(s.id);
   const kand = state.ergebnisse.get(s.id)?.kandidaten ?? [];
-  const lizenz = q.lizenzen.map((l) => (l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.lizenz)}</a>` : esc(l.lizenz))).join(", ");
+  const lizenz = q ? q.lizenzen.map(lizenzLink).join(", ") : "";
   const partner = partnerVon(s);
   const gruende = lage === "pruefen" || lage === "ohne" ? gruendeVon(s) : [];
   const zeile = (k, v) => (v == null || v === "" ? "" : `<dt>${esc(k)}</dt><dd>${v}</dd>`);
   const linkHtml = link
     ? `<dl class="linkinfo">${zeile("Link", esc(link.id))}${zeile("Abstand", link.d != null ? `${de(link.d, 1)} m` : null)}${zeile("Richtung", link.grad != null ? `${kurz(link.grad)} ${de(link.grad)}°${link.abweichung != null ? `, ${de(link.abweichung)}° Abweichung` : ""}` : null)}${zeile("type", esc(link.type ?? ""))}${zeile("name", esc(link.name ?? ""))}${zeile("modes", esc(link.modes || "(car)"))}${zeile("OSM-Weg", wegHtml(link.weg))}${zeile("Tempo", link.kmh != null ? `${de(link.kmh, 1)} km/h` : null)}${zeile("capacity", link.capacity != null && !link.osm ? `${de(link.capacity)} Fz/h, ${de(link.permlanes ?? 0, 1)} Fahrstreifen` : null)}</dl>`
     : "";
-  box.innerHTML = `
+  // ein Kurzzeit-Punkt von Hand auf einem Link einer Dauerzählstelle: erlaubt, aber sagen
+  const dauerDort = kurzPunkt && link ? (state.inhaber?.get(link.id) ?? []).filter((t) => familieVon(t) === "dauer" && ausgabeModi(t).some((m) => ausgabeModi(s).includes(m))) : [];
+  const kopf = kurzPunkt
+    ? kopfKurz(s)
+    : `
     <div><h3>${esc(s.name || s.id)}</h3>${s.abschnitt ? `<p class="sub">${esc(s.abschnitt)}</p>` : ""}</div>
     <div class="meta">${kompassSvg(s.r.grad)}<span>${esc(richtungsText(s))}</span></div>
     <div class="meta"><span>${esc(s.id)}</span>·<span>${esc(q.name)}</span>·<span>${lizenz}</span>·<span>${s.gruppen.map((g) => esc(state.daten.gruppenNamen[g] ?? g)).join(", ")}</span></div>
-    ${state.stunden.get(s.id)?.fahrstreifen?.length ? `<div class="meta"><span>Fahrstreifen: ${esc(state.stunden.get(s.id).fahrstreifen.join(", "))}</span></div>` : ""}
+    ${state.stunden.get(s.id)?.fahrstreifen?.length ? `<div class="meta"><span>Fahrstreifen: ${esc(state.stunden.get(s.id).fahrstreifen.join(", "))}</span></div>` : ""}`;
+  const profil = kurzPunkt ? profilKurzSvg(s) : state.stunden.has(s.id) ? profilSvg(s) : '<p class="note">Stundenwerte werden geladen …</p>';
+  box.innerHTML = `${kopf}
     <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE[lage]})">${esc(LAGE_TEXT[lage])}${e?.uebernommen && e.link ? " · übernommen" : e?.link && kand[0]?.id !== e.link.id ? " · von Hand" : ""}</span></div>
+    ${dauerDort.length ? `<p class="note">Auf diesem Link liegt auch ${esc(dauerDort.map(stelleText).join(", "))}. Beide gehen in ihre eigene Datei.</p>` : ""}
     ${e?.uebernommen && e.link ? `<p class="note">Übernommen aus „${esc(e.uebernommen.netz ?? "einer Zuordnung")}“: ${esc(WIE[e.uebernommen.wie] ?? e.uebernommen.wie)}${e.uebernommen.d != null ? `, ${de(e.uebernommen.d, 1)} m vom übernommenen Punkt` : ""}.</p>` : ""}
     ${gruende.length ? `<ul class="gruende">${gruende.map((g) => `<li>${esc(g)}</li>`).join("")}</ul>` : ""}
     ${linkHtml}
@@ -1528,7 +2075,7 @@ function renderKarte() {
     </div>
     <div class="field"><label for="kommentar">Kommentar</label><textarea id="kommentar" rows="1" placeholder="geht in die CSV">${esc(e?.kommentar ?? "")}</textarea></div>
     ${kand.length ? `<table class="kand"><caption class="visually-hidden">Links im Umkreis</caption><thead><tr><th></th><th>Link</th><th>Abstand</th><th>Abw.</th><th>Name / Typ</th><th></th></tr></thead><tbody>${kand.map((k, r) => `<tr class="${k.id === link?.id ? "cur" : ""}"><td><span class="rang">${r + 1}</span></td><td>${esc(k.id)}</td><td>${de(k.d, 1)} m</td><td>${k.abweichung != null ? `${de(k.abweichung)}°` : "–"}</td><td class="x" title="${esc([k.name, k.type].filter(Boolean).join(" · "))}">${esc([k.name, k.type].filter(Boolean).join(" · ") || "–")}</td><td>${k.id === link?.id || lage === "aus" ? "" : `<button type="button" class="linkbtn" data-act="nimm" data-i="${k.i}">nehmen</button>`}</td></tr>`).join("")}</tbody></table>` : '<p class="note">Kein Link im Umkreis. Auf der Karte lässt sich einer wählen.</p>'}
-    <div>${state.stunden.has(s.id) ? profilSvg(s) : '<p class="note">Stundenwerte werden geladen …</p>'}</div>`;
+    <div>${profil}</div>`;
   const k = box.querySelector("#kommentar");
   k.addEventListener("change", () => {
     entscheid(s.id).kommentar = k.value.trim();
@@ -1598,8 +2145,9 @@ async function ladeStunden(stellen) {
   return fehler === 0;
 }
 
-function genutzteStellen() {
-  return state.stellen.filter((s) => lageVon(s) !== "aus" && linkVon(s) && (!$("nur-geprueft").checked || lageVon(s) === "geprueft"));
+/** Die Stellen einer Familie, die in die Ausgabe gehen: mit Link, nicht ausgelassen, wahlweise nur geprüfte. */
+function genutzteStellen(familie = "dauer") {
+  return state.stellen.filter((s) => familieVon(s) === familie && lageVon(s) !== "aus" && linkVon(s) && (!$("nur-geprueft").checked || lageVon(s) === "geprueft"));
 }
 
 async function ladeAlleStunden() {
@@ -1627,7 +2175,7 @@ function renderMittelRahmen() {
   }));
   // der Zeitraum der Stundenwerte je Quelle (die jüngsten 12 Monate)
   if (!state.daten) return;
-  const quellen = [...new Set(state.stellen.map((s) => s.quelle))].map((c) => state.daten.quellen.get(c)).filter(Boolean);
+  const quellen = [...new Set(state.stellen.filter((s) => familieVon(s) === "dauer").map((s) => s.quelle))].map((c) => state.daten.quellen.get(c)).filter(Boolean);
   const raeume = quellen.filter((q) => q.stundenVon && q.bis).map((q) => [tagNr(q.stundenVon), tagNr(q.bis)]);
   if (raeume.length) {
     const min = Math.min(...raeume.map((r) => r[0]));
@@ -1693,6 +2241,7 @@ function mittleAlle() {
   let unvollstaendig = 0;
   let ohneWerte = 0;
   for (const s of state.stellen) {
+    if (familieVon(s) !== "dauer") continue; // Kurzzeitzählungen: ein Tag, kein Mittel
     const st = state.stunden.get(s.id);
     if (st === undefined) continue;
     const r = {};
@@ -1715,6 +2264,53 @@ const stamm = () => {
   if (!n) return "netz";
   return n.beispiel ? "berlin-matsim-libs" : scenarioStem(n.name) || "netz";
 };
+
+/**
+ * Je Link eine Messstelle aus den Einträgen { s, measurements, attributes, tage } der Stellen:
+ * MATSim erlaubt je Link nur eine Messstelle und führt Werte desselben Verkehrsmittels zusammen;
+ * die erste Gruppe gilt. -> { locations, genutzt (die Einträge, die hineingingen) }.
+ */
+function messstellen(jeLink, drausen) {
+  const locations = [];
+  const alleGenutzt = [];
+  for (const [refId, eintraege] of jeLink) {
+    const modi = new Set();
+    const measurements = [];
+    const attributes = [];
+    const genutzt = [];
+    for (const en of eintraege) {
+      const eigene = en.measurements.filter((m) => {
+        if (modi.has(m.networkMode)) {
+          drausen.doppelterModus++;
+          return false;
+        }
+        modi.add(m.networkMode);
+        return true;
+      });
+      if (!eigene.length) continue;
+      measurements.push(...eigene);
+      genutzt.push(en);
+      // teilen sich Stellen einen Link, tragen ihre Angaben das Verkehrsmittel als Endung
+      const endung = eintraege.length > 1 ? `_${eigene[0].networkMode}` : "";
+      attributes.push(...en.attributes.map(([k, ...rest]) => [`${k}${endung}`, ...rest]), ...(en.tage ?? []));
+    }
+    if (!genutzt.length) continue;
+    const erste = genutzt[0].s;
+    const erg = state.ergebnisse.get(erste.id);
+    if (genutzt.length > 1) attributes.unshift(["stellen", genutzt.map((en) => en.s.id).join(", ")]);
+    locations.push({
+      refId,
+      id: genutzt.map((en) => en.s.id).join("+"),
+      name: [...new Set(genutzt.map((en) => en.s.name || en.s.id))].join(" / "),
+      x: erg?.x,
+      y: erg?.y,
+      attributes,
+      measurements,
+    });
+    alleGenutzt.push(...genutzt);
+  }
+  return { locations, genutzt: alleGenutzt };
+}
 
 /** Die counts.xml aus den Zuordnungen und dem Mittel; dazu, was dabei draußen blieb. */
 function baueCounts() {
@@ -1769,44 +2365,8 @@ function baueCounts() {
     if (!jeLink.has(link.id)) jeLink.set(link.id, []);
     jeLink.get(link.id).push(eintrag);
   }
-  const locations = [];
-  for (const [refId, eintraege] of jeLink) {
-    // MATSim führt Werte desselben Verkehrsmittels an einer Messstelle zusammen; die erste Gruppe gilt
-    const modi = new Set();
-    const measurements = [];
-    const attributes = [];
-    const genutzt = [];
-    for (const en of eintraege) {
-      const eigene = en.measurements.filter((m) => {
-        if (modi.has(m.networkMode)) {
-          drausen.doppelterModus++;
-          return false;
-        }
-        modi.add(m.networkMode);
-        return true;
-      });
-      if (!eigene.length) continue;
-      measurements.push(...eigene);
-      genutzt.push(en);
-      quellen.set(en.q.code, en.q);
-      // teilen sich Stellen einen Link, tragen ihre Angaben das Verkehrsmittel als Endung
-      const endung = eintraege.length > 1 ? `_${eigene[0].networkMode}` : "";
-      attributes.push(...en.attributes.map(([k, ...rest]) => [`${k}${endung}`, ...rest]), ...en.tage);
-    }
-    if (!genutzt.length) continue;
-    const erste = genutzt[0].s;
-    const erg = state.ergebnisse.get(erste.id);
-    if (genutzt.length > 1) attributes.unshift(["stellen", genutzt.map((en) => en.s.id).join(", ")]);
-    locations.push({
-      refId,
-      id: genutzt.map((en) => en.s.id).join("+"),
-      name: [...new Set(genutzt.map((en) => en.s.name || en.s.id))].join(" / "),
-      x: erg?.x,
-      y: erg?.y,
-      attributes,
-      measurements,
-    });
-  }
+  const { locations, genutzt } = messstellen(jeLink, drausen);
+  for (const en of genutzt) quellen.set(en.q.code, en.q);
   const m = state.mittel;
   const attributes = [
     ["erstellt_mit", "matsim-counts-snapper, https://github.com/vizsim-lab/matsim-counts-snapper"],
@@ -1832,30 +2392,143 @@ function baueCounts() {
   return { xml, locations, quellen: [...quellen.values()], drausen };
 }
 
+/** Die Auswahl der Kurzzeitzählungen in Worten, für die counts-kurzzeit.xml. */
+function kurzAuswahlText(o = state.kurz.opts) {
+  const tage = WOCHENTAGE.filter((w) => o.wochentage.includes(w.nr)).map((w) => w.kurz).join(", ");
+  const arten = { s: "Schultage", f: "Ferientage", h: "Feiertage", u: "Tage ohne Ferienkalender" };
+  const werktags = o.wochentage.some((w) => w >= 1 && w <= 5) ? ` (Mo–Fr nur ${o.tage.map((a) => arten[a]).filter(Boolean).join(", ") || "keine"})` : "";
+  const alle = [...(state.kurz.manifest?.jahre.values() ?? [])].flat();
+  const jahre = `${o.vonJahr ?? (alle.length ? Math.min(...alle) : "Anfang")} bis ${o.bisJahr ?? (alle.length ? Math.max(...alle) : "Ende")}`;
+  return `je Stelle und Gruppe die jüngste Zählung ${jahre} an ${tage}${werktags} mit mindestens ${o.minStunden} gezählten Stunden; ein Tag, nur die gezählten Stunden, kein Mittel`;
+}
+
+/** Die Lizenzen der Kurzzeit-Punkte, die hineingehen, je Quelle: [{ quelle, lizenzen: [Einträge] }]. */
+function kurzLizenzen(stellen) {
+  const je = new Map();
+  for (const s of stellen) {
+    const q = s.kurz.quelle;
+    if (!je.has(q)) je.set(q, new Map());
+    for (const l of [s.lizenz.lieferung, s.lizenz.lage]) if (l) je.get(q).set(l.code, l);
+  }
+  return [...je].map(([code, l]) => ({ quelle: state.kurz.manifest?.quellen.get(code) ?? { code, name: code }, lizenzen: [...l.values()] }));
+}
+
+/**
+ * Die counts-kurzzeit.xml: je Kurzzeit-Punkt mit Link die gezählten Stunden seines einen Tages,
+ * t = Beginn der Stunde in Sekunden. Gekennzeichnet in den Attributen jeder Messstelle
+ * (zaehlart=kurzzeit, Datum, Zählfenster, Art des Tages, Arm); MATSim liest sie, beachtet sie
+ * aber nicht – darum eine eigene Datei.
+ */
+function baueKurzCounts() {
+  const drausen = { ohneWerte: 0, doppelterModus: 0 };
+  const jeLink = new Map();
+  const namen = state.kurz.manifest?.gruppenNamen ?? {};
+  const stellen = genutzteStellen("kurz");
+  for (const s of stellen) {
+    const p = s.kurz;
+    const link = linkVon(s);
+    const measurements = [];
+    for (const g of KURZ_GRUPPEN) {
+      if (!s.aktiv.includes(g) || !p.werte[g]) continue;
+      const values = p.werte[g].flatMap((v, k) => (v == null ? [] : [[(p.h0 + k) * 3600, v]]));
+      if (!values.length) {
+        drausen.ohneWerte++;
+        continue;
+      }
+      measurements.push({ type: "volumes", networkMode: state.gruppen[g].mode, interval: 3600, values });
+    }
+    if (!measurements.length) continue;
+    const e = state.entscheid.get(s.id);
+    const liz = [s.lizenz.lieferung, s.lizenz.lage].filter(Boolean);
+    const eintrag = {
+      s,
+      measurements,
+      attributes: [
+        ["zaehlart", "kurzzeit"],
+        ["quelle", p.quelle],
+        ["lizenz", liz.map((l) => l.lizenz).join(", ")],
+        ["stelle", p.stelle],
+        ["zaehlung", p.kennung],
+        ["datum", p.datum],
+        ["wochentag", WOCHENTAG_KURZ[wochentag(tagNr(p.datum))]],
+        ["tagtyp", TAGTYP[p.tag ?? "u"]],
+        ["fenster", p.fenster],
+        ["art", p.art === "knoten" ? "Knoten" : "Querschnitt"],
+        ["arm", `${p.arm.nr}${p.arm.name ? ` ${p.arm.name}` : ""}`],
+        ["seite", p.art === "knoten" ? (p.seite === "zu" ? "Zufahrt" : "Ausfahrt") : "Richtung"],
+        ["stroeme", p.stroeme.map(([a, b]) => `${a}→${b}`).join(", ")],
+        ["richtung_grad", p.grad != null ? Math.round(p.grad) : null],
+        ["gruppen", s.aktiv.filter((g) => p.werte[g]).map((g) => `${namen[g] ?? g}=${state.gruppen[g].mode}`).join(", ")],
+        ["lage", p.lage],
+        ["abstand_m", link.d != null ? Math.round(link.d * 10) / 10 : null, "java.lang.Double"],
+        ["abweichung_grad", link.abweichung != null ? Math.round(link.abweichung) : null],
+        ["zuordnung", e?.link ? "geprüft" : "automatisch"],
+        ["kommentar", e?.kommentar],
+      ],
+    };
+    if (!jeLink.has(link.id)) jeLink.set(link.id, []);
+    jeLink.get(link.id).push(eintrag);
+  }
+  const { locations, genutzt } = messstellen(jeLink, drausen);
+  const o = state.kurz.opts;
+  const attributes = [
+    ["erstellt_mit", "matsim-counts-snapper, https://github.com/vizsim-lab/matsim-counts-snapper"],
+    ["zaehlart", "kurzzeit"],
+    ["zaehlkarte", `Kurzzeitzählungen der Zählkarte (vizsim-lab) je Strom, Stand ${state.kurz.manifest?.erzeugt ?? "?"}, ${DATEN}stroeme/`],
+    ["netz", state.netz?.url ?? (state.netz?.beispiel ? BEISPIEL.url : state.netz?.name)],
+    ["auswahl", kurzAuswahlText(o)],
+    ["hinweis", "Je Messstelle ein gezählter Tag (Datum, Zählfenster und Art des Tages in ihren Attributen), nur die gezählten Stunden, meist 7 bis 19 Uhr. Eine Tagessumme ist nur die Summe des Zählfensters. Nach Stunden vergleichen, nicht über den Tag."],
+    ["arm_abstand_m", o.abstand],
+    ["min_stunden", o.minStunden],
+    ["gruppen", o.gruppen.map((g) => `${g}=${state.gruppen[g].mode}`).join(", ")],
+    ...kurzLizenzen(genutzt.map((en) => en.s)).map(({ quelle, lizenzen }) => [`quelle_${quelle.code}`, `${quelle.name}; ${lizenzen.map((l) => `${l.lizenz}${l.titel ? ` (${l.titel})` : ""}${l.url ? ` ${l.url}` : ""}`).join("; ")}`]),
+  ];
+  const jahr = Number($("jahr").value);
+  const xml = countsXml({
+    name: `${$("counts-name").value.trim() || `Zählkarte ${stamm()}`}, Kurzzeitzählungen`,
+    source: "Zählkarte (vizsim-lab), Kurzzeitzählungen",
+    description: kurzAuswahlText(o),
+    year: Number.isInteger(jahr) ? jahr : new Date().getFullYear(),
+    attributes,
+    locations,
+  });
+  return { xml, locations, drausen, stellen: genutzt.map((en) => en.s) };
+}
+
+const EINSCHRAENKUNG = /NC|SA|Nutzungsbeschr|ODbL/i;
+
 function renderExport() {
-  const bereit = state.stellen.length > 0;
+  const dauerDa = state.stellen.some((s) => familieVon(s) === "dauer");
+  const kurzDa = state.stellen.some((s) => familieVon(s) === "kurz");
   const osm = Boolean(state.netz?.info?.osm);
-  for (const id of ["counts-xml", "counts-gz"]) $(id).disabled = !bereit || osm;
-  $("zuordnung-csv").disabled = !bereit;
+  for (const id of ["counts-xml", "counts-gz"]) $(id).disabled = !dauerDa || osm;
+  $("kurz-export").hidden = !kurzDa;
+  for (const id of ["kurz-xml", "kurz-gz"]) $(id).disabled = !kurzDa || osm;
+  $("zuordnung-csv").disabled = !state.stellen.length;
   $("osm-export").hidden = !osm;
-  const genutzt = genutzteStellen();
+  const genutzt = genutzteStellen("dauer");
+  const kurze = genutzteStellen("kurz");
   const fehlt = genutzt.filter((s) => !state.stunden.has(s.id)).length;
-  const offen = zaehle("pruefen");
+  const offen = (familie) => state.stellen.filter((s) => familieVon(s) === familie && lageVon(s) === "pruefen").length;
   const t = $("export-text");
   const teile = [];
-  if (bereit) teile.push(`${de(genutzt.length)} Stellen mit Link gehen hinein${$("nur-geprueft").checked ? " (nur geprüfte)" : ""}.`);
-  if (offen && !$("nur-geprueft").checked) teile.push(`${de(offen)} davon sind noch nicht geprüft.`);
-  if (fehlt) teile.push(`Für ${de(fehlt)} fehlen noch die Stundenwerte; die Knöpfe laden sie vorher.`);
+  const nurGeprueft = $("nur-geprueft").checked;
+  if (dauerDa) teile.push(`${de(genutzt.length)} Dauerzählstellen mit Link gehen in die counts.xml${nurGeprueft ? " (nur geprüfte)" : ""}${offen("dauer") && !nurGeprueft ? `, ${de(offen("dauer"))} davon noch nicht geprüft` : ""}.`);
+  if (kurzDa) teile.push(`${de(kurze.length)} Kurzzeit-Punkte mit Link gehen in die counts-kurzzeit.xml${nurGeprueft ? " (nur geprüfte)" : ""}${offen("kurz") && !nurGeprueft ? `, ${de(offen("kurz"))} davon noch nicht geprüft` : ""}.`);
+  if (fehlt) teile.push(`Für ${de(fehlt)} Dauerzählstellen fehlen noch die Stundenwerte; die Knöpfe laden sie vorher.`);
   t.hidden = !teile.length;
   t.textContent = teile.join(" ");
   // Quellen und Lizenzen der Stellen, die hineingehen
   const quellen = [...new Set(genutzt.map((s) => s.quelle))].map((c) => state.daten?.quellen.get(c)).filter(Boolean);
-  $("quellen-box").hidden = !quellen.length;
-  $("quellen").replaceChildren(...quellen.map((q) => {
+  const eintraege = quellen.map((q) => ({ name: q.name, lizenzen: q.lizenzen, vermerk: q.quellenvermerk }));
+  for (const { quelle, lizenzen } of kurzLizenzen(kurze)) eintraege.push({ name: `${quelle.name} (Kurzzeitzählungen)`, lizenzen, vermerk: null, titel: true });
+  $("quellen-box").hidden = !eintraege.length;
+  $("quellen").replaceChildren(...eintraege.map((q) => {
     const li = document.createElement("li");
-    const einschr = q.lizenzen.some((l) => /NC|SA|Nutzungsbeschr/i.test(l.lizenz ?? ""));
+    const einschr = q.lizenzen.some((l) => EINSCHRAENKUNG.test(l.lizenz ?? ""));
     li.className = einschr ? "einschr" : "";
-    li.innerHTML = `<b>${esc(q.name)}</b>: ${q.lizenzen.map((l) => (l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.lizenz)}</a>` : esc(l.lizenz))).join(", ")}${q.quellenvermerk ? ` <span class="v">· ${esc(q.quellenvermerk)}</span>` : ""}${einschr ? ' <span class="v">· mit Einschränkung</span>' : ""}`;
+    const liz = q.lizenzen.map((l) => `${lizenzLink(l)}${q.titel && l.titel ? ` <span class="v">(${esc(l.titel)})</span>` : ""}`).join(", ");
+    li.innerHTML = `<b>${esc(q.name)}</b>: ${liz}${q.vermerk ? ` <span class="v">· ${esc(q.vermerk)}</span>` : ""}${einschr ? ' <span class="v">· mit Einschränkung</span>' : ""}`;
     return li;
   }));
   if (!$("counts-name").value && state.netz) $("counts-name").placeholder = `Zählkarte ${stamm()}`;
@@ -1898,6 +2571,20 @@ async function exportiere(gz) {
 }
 $("counts-xml").addEventListener("click", () => exportiere(false));
 $("counts-gz").addEventListener("click", () => exportiere(true));
+
+async function exportiereKurz(gz) {
+  const { xml, locations, drausen, stellen } = baueKurzCounts();
+  const name = `${stamm()}-counts-kurzzeit.xml`;
+  if (gz) {
+    const stream = new Blob([xml]).stream().pipeThrough(new CompressionStream("gzip"));
+    speichern(`${name}.gz`, await new Response(stream).arrayBuffer(), "application/gzip");
+  } else speichern(name, xml, "application/xml");
+  const teile = [`${de(locations.length)} Messstellen aus ${de(stellen.length)} Kurzzeit-Punkten in ${name}${gz ? ".gz" : ""}.`];
+  if (drausen.doppelterModus) teile.push(`${de(drausen.doppelterModus)}-mal zwei Gruppen mit demselben networkMode an einem Link: nur die erste ging hinein.`);
+  setStatus(teile.join(" "), "done");
+}
+$("kurz-xml").addEventListener("click", () => exportiereKurz(false));
+$("kurz-gz").addEventListener("click", () => exportiereKurz(true));
 
 /** Der Punkt einer Linie in WGS 84, der (lon, lat) am nächsten liegt, mit ihrer Richtung dort (Grad ab Nord). */
 function punktAufLinie(lon, lat, geom) {
@@ -1953,6 +2640,7 @@ $("zuordnung-csv").addEventListener("click", () => {
       anker_grad: a?.grad != null ? Math.round(a.grad) : "",
       osm_weg: link?.weg ?? "",
       netz: link ? netzName() : "",
+      zaehlart: familieVon(s) === "kurz" ? "kurzzeit" : "dauer",
     };
   });
   speichern(`${stamm()}-counts-zuordnung.csv`, zuordnungCsv(zeilen), "text/csv");
@@ -1967,12 +2655,14 @@ $("csv-file").addEventListener("change", async (e) => {
     const zeilen = leseZuordnungCsv(await file.text());
     let gesetzt = 0;
     let fremd = 0;
+    let fremdKurz = 0;
     let ohneLink = 0;
     const mitAnker = [];
     for (const z of zeilen) {
       const s = state.byId.get(z.station);
       if (!s) {
         fremd++;
+        if (familieVonId(z.station) === "kurz") fremdKurz++;
         continue;
       }
       const ent = entscheid(s.id);
@@ -2008,9 +2698,15 @@ $("csv-file").addEventListener("change", async (e) => {
         anker: mitAnker.map(({ s, z }) => ({ id: s.id, lon: z.anker.lon, lat: z.anker.lat, grad: z.anker.grad, linkId: z.linkid || null, weg: z.weg, modi: s.modi, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } })),
       });
       const nach = new Map(r.ergebnisse.map((x) => [x.id, x]));
-      // ein Link trägt je Verkehrsmittel eine Stelle: bei zweien gewinnt, wessen Anker näher liegt
+      // ein Link trägt je Verkehrsmittel und Familie eine Stelle: bei zweien gewinnt, wessen Anker näher liegt
       const belegt = new Map();
-      for (const [andere, e] of state.entscheid) if (e.link && !mitAnker.some(({ s }) => s.id === andere)) belegt.set(e.link.id, [...(belegt.get(e.link.id) ?? []), andere]);
+      const platz = (familie, linkId) => `${familie}\u0000${linkId}`;
+      const mitAnkerIds = new Set(mitAnker.map(({ s }) => s.id));
+      for (const [andere, e] of state.entscheid) {
+        if (!e.link || mitAnkerIds.has(andere)) continue;
+        const key = platz(familieVonId(andere), e.link.id);
+        belegt.set(key, [...(belegt.get(key) ?? []), andere]);
+      }
       const reihe = [...mitAnker].sort((a, b) => (nach.get(a.s.id)?.ankerAbstand ?? Infinity) - (nach.get(b.s.id)?.ankerAbstand ?? Infinity));
       for (const { s, z } of reihe) {
         const x = nach.get(s.id);
@@ -2018,11 +2714,12 @@ $("csv-file").addEventListener("change", async (e) => {
         const herkunft = z.netz || file.name;
         ent.anker = { lon: z.anker.lon, lat: z.anker.lat, grad: z.anker.grad, weg: z.weg, netz: herkunft };
         const modi = ausgabeModi(s);
-        const schon = x?.link ? (belegt.get(x.link.id) ?? []).find((t) => ausgabeModi(state.byId.get(t) ?? { aktiv: [] }).some((m) => modi.includes(m))) : null;
+        const key = x?.link ? platz(familieVon(s), x.link.id) : null;
+        const schon = key ? (belegt.get(key) ?? []).find((t) => ausgabeModi(state.byId.get(t) ?? { aktiv: [] }).some((m) => modi.includes(m))) : null;
         if (x?.link && !schon) {
           ent.link = x.link;
           ent.uebernommen = { wie: x.wie, netz: herkunft, d: x.ankerAbstand != null ? Math.round(x.ankerAbstand * 10) / 10 : null };
-          belegt.set(x.link.id, [...(belegt.get(x.link.id) ?? []), s.id]);
+          belegt.set(key, [...(belegt.get(key) ?? []), s.id]);
           wie[x.wie]++;
         } else {
           ent.link = null;
@@ -2036,7 +2733,7 @@ $("csv-file").addEventListener("change", async (e) => {
     const uebernommen = wie.id + wie.weg + wie.lage;
     if (mitAnker.length) teile.push(`${de(uebernommen)} von ${de(mitAnker.length)} geprüften Zuordnungen übernommen${uebernommen ? ` (${[[wie.id, "gleiche Link-ID"], [wie.weg, "gleicher OSM-Weg"], [wie.lage, "eindeutige Lage"]].filter(([n]) => n).map(([n, t]) => `${de(n)} ${t}`).join(", ")})` : ""}${offen ? `, ${de(offen)} zum Prüfen` : ""}.`);
     if (gesetzt || !mitAnker.length) teile.push(`${de(gesetzt)} Entscheidungen ${mitAnker.length ? "ohne Anker " : ""}übernommen.`);
-    if (fremd) teile.push(`${de(fremd)} Stationen gehören nicht zur Auswahl.`);
+    if (fremd) teile.push(`${de(fremd)} Stationen gehören nicht zur Auswahl${fremdKurz ? ` (${de(fremdKurz)} Kurzzeit-Punkte${state.kurz.an ? ", etwa aus anderen Jahren oder einer anderen Auswahl" : "; die Kurzzeitzählungen sind aus"})` : ""}.`);
     if (ohneLink) teile.push(`${de(ohneLink)} Links fehlen im Netz.`);
     if (mitAnker.length) {
       // die offenen suchen jetzt vom Anker aus
@@ -2054,8 +2751,22 @@ try {
   const g = JSON.parse(store.get("snapper.gruppen") ?? "null");
   if (g) for (const k of GRUPPEN) if (g[k]) Object.assign(state.gruppen[k], g[k]);
 } catch { /* Vorgabe */ }
+try {
+  const k = JSON.parse(store.get("snapper.kurz") ?? "null");
+  if (k) {
+    state.kurz.an = Boolean(k.an);
+    for (const key of Object.keys(KURZ_VORGABE)) if (k.opts?.[key] !== undefined) state.kurz.opts[key] = k.opts[key];
+    state.kurz.opts.gruppen = state.kurz.opts.gruppen.filter((g) => KURZ_GRUPPEN.includes(g));
+    if (k.opts?.lieferungen && typeof k.opts.lieferungen === "object") state.kurz.opts.lieferungen = { ...k.opts.lieferungen };
+  }
+} catch { /* Vorgabe */ }
 renderMittelRahmen();
+renderKurz();
 ladeDaten();
+if (state.kurz.an) {
+  $("kurz").open = true;
+  ladeKurz().then(renderKurz);
+}
 const netParam = params.get("net");
 if (params.get("crs")) $("crs").value = params.get("crs");
 if (netParam) {
@@ -2072,4 +2783,4 @@ if (netParam) {
 }
 
 // für Tests im Browser: ?debug gibt Karte und Zustand frei
-if (params.has("debug")) window.snapper = { map, state, lageVon, linkVon };
+if (params.has("debug")) window.snapper = { map, state, lageVon, linkVon, waehle, gruendeVon };

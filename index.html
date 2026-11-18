@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MATSim Counts Snapper</title>
-<meta name="description" content="Legt Dauerzählstellen der Zählkarte auf die Links eines MATSim-Netzes, mittelt ihre Stundenwerte und schreibt eine counts.xml, komplett im Browser.">
+<meta name="description" content="Legt Dauer- und Kurzzeitzählungen der Zählkarte auf die Links eines MATSim-Netzes, mittelt die Stundenwerte der Dauerzählstellen und schreibt counts.xml-Dateien, komplett im Browser.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f2b705'/%3E%3Cpath d='M5 22 27 12' fill='none' stroke='%2317202c' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M12 9v8' fill='none' stroke='%2317202c' stroke-width='2' stroke-dasharray='2 2'/%3E%3Ccircle cx='12' cy='8' r='3.5' fill='%2317202c'/%3E%3C/svg%3E">
 <!-- Schriften und Bibliotheken liegen in vendor/: Beim Öffnen gehen keine Anfragen an Schrift- oder CDN-Dienste. -->
 <link rel="stylesheet" href="vendor/fonts/fonts.css">
@@ -144,6 +144,9 @@ code { font: 0.92em var(--font-mono); }
 .seg button span { font-weight: 500; opacity: 0.8; margin-left: 3px; font-variant-numeric: tabular-nums; }
 
 .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.fields.off { opacity: 0.55; }
+.kurz .check small { margin-left: 2px; }
+.kurz-lieferungen { display: flex; flex-direction: column; gap: 4px; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field.wide { grid-column: 1 / -1; }
 .field label, .field .label { font: 600 12.5px/1.2 var(--font-display); letter-spacing: 0.04em; color: var(--muted); }
@@ -193,6 +196,8 @@ code { font: 0.92em var(--font-mono); }
 .liste button:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .liste button[aria-current="true"] { background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .liste .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c); align-self: center; }
+.liste .dot.ring, .legend .lg i.ring { background: transparent; box-shadow: inset 0 0 0 2.5px var(--c); }
+#familie { margin-bottom: -4px; }
 .liste .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .liste .t small { font-weight: 400; color: var(--muted); }
 .liste .m { font: 12.5px/1.3 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -291,7 +296,7 @@ code { font: 0.92em var(--font-mono); }
 <div class="app">
   <aside class="panel">
     <div class="plate"><h1>MATSim Counts Snapper</h1><span>Zählkarte · Links · counts.xml</span></div>
-    <p class="lede">Legt Dauerzählstellen der <a href="https://vizsim-lab.github.io/zaehlkarte/" target="_blank" rel="noopener">Zählkarte</a> auf die Links eines MATSim-Netzes, mittelt ihre Stundenwerte und schreibt eine <code>counts.xml</code>. Geprüft werden kann auch auf einem OSM-Auszug: Die Zuordnung lässt sich dann auf jede Netzversion übertragen. Alles läuft im Browser; eigene Dateien verlassen das Gerät nicht.</p>
+    <p class="lede">Legt Dauerzählstellen der <a href="https://vizsim-lab.github.io/zaehlkarte/" target="_blank" rel="noopener">Zählkarte</a> auf die Links eines MATSim-Netzes, mittelt ihre Stundenwerte und schreibt eine <code>counts.xml</code>; wahlweise auch Kurzzeitzählungen je Knotenarm und Fahrtrichtung, in eine eigene Datei. Geprüft werden kann auch auf einem OSM-Auszug: Die Zuordnung lässt sich dann auf jede Netzversion übertragen. Alles läuft im Browser; eigene Dateien verlassen das Gerät nicht.</p>
 
     <div class="status" id="status" data-state="idle" aria-live="polite">
       <span class="text" id="status-text">Wartet auf ein Netz.</span>
@@ -380,10 +385,62 @@ code { font: 0.92em var(--font-mono); }
           <span>Stellen, die nur ein Ziel nennen („Richtung Lindau“), mitnehmen und zum Prüfen markieren</span>
         </label>
       </div>
+      <details class="svn kurz" id="kurz">
+        <summary>Kurzzeitzählungen <small id="kurz-sum">aus</small></summary>
+        <div class="svn-body">
+          <label class="check" for="kurz-an">
+            <input type="checkbox" id="kurz-an">
+            <span>Kurzzeitzählungen der Zählkarte dazunehmen: je Knotenarm eine Zufahrt und eine Ausfahrt, je Querschnitt die Fahrtrichtungen</span>
+          </label>
+          <p class="note" id="kurz-text">Ein gezählter Tag je Stelle, meist 7 bis 19 Uhr: eine Momentaufnahme. Sie gehen in eine eigene Datei (<code>counts-kurzzeit.xml</code>), jede Messstelle mit Datum, Zählfenster und Art des Tages; auf einem Link gehen Dauerzählstellen vor.</p>
+          <div class="fields" id="kurz-felder">
+            <div class="field">
+              <label for="kurz-von">ab Jahr</label>
+              <input type="number" id="kurz-von" min="1980" max="2100" step="1" value="2019">
+            </div>
+            <div class="field">
+              <label for="kurz-bis">bis Jahr</label>
+              <input type="number" id="kurz-bis" min="1980" max="2100" step="1" placeholder="jüngstes">
+            </div>
+            <div class="field wide">
+              <span class="label">Wochentage</span>
+              <div class="tage" id="kurz-wochentage" role="group" aria-label="Wochentage der Kurzzeitzählungen"></div>
+            </div>
+            <div class="field wide">
+              <span class="label">Montag bis Freitag nur an</span>
+              <div class="row">
+                <label class="check"><input type="checkbox" class="kurz-tag" value="s" checked>Schultagen</label>
+                <label class="check"><input type="checkbox" class="kurz-tag" value="f">Ferientagen</label>
+                <label class="check"><input type="checkbox" class="kurz-tag" value="h">Feiertagen</label>
+                <label class="check"><input type="checkbox" class="kurz-tag" value="u">Tagen ohne Kalender</label>
+              </div>
+            </div>
+            <div class="field wide">
+              <span class="label">Gruppen (networkMode und „Link erlaubt“ wie oben)</span>
+              <div class="row" id="kurz-gruppen"></div>
+            </div>
+            <div class="field wide" id="kurz-lieferungen-feld" hidden>
+              <span class="label">Lieferungen</span>
+              <div class="kurz-lieferungen" id="kurz-lieferungen"></div>
+              <small>Lieferungen unter CC BY-SA sind aus, bis man sie einschaltet: Deren Bedingung, die Weitergabe unter gleicher Lizenz, gälte für die ganze Datei.</small>
+            </div>
+            <div class="field">
+              <label for="kurz-stunden">Mindestens gezählte Stunden</label>
+              <input type="number" id="kurz-stunden" min="1" max="24" step="1" value="12">
+            </div>
+            <div class="field">
+              <label for="kurz-abstand">Arm-Punkt vom Knoten (m)</label>
+              <input type="number" id="kurz-abstand" min="10" max="100" step="5" value="25">
+            </div>
+          </div>
+          <small class="hint">Je Stelle und Gruppe zählt die jüngste Zählung, die passt. Ein Knotenarm wird zu zwei Punkten auf dem Arm: Zufahrt (die Ströme vom Arm) und Ausfahrt (die Ströme zum Arm), mit der Richtung aus dem Winkel des Arms; sie suchen Links nur bis 5 m vor den Knoten. Ein Querschnitt wird je Fahrtrichtung zu einem Punkt an der Stelle. Jeder Punkt liegt 3 m rechts seiner Fahrtrichtung. Nichts wird gemittelt oder hochgerechnet.</small>
+        </div>
+      </details>
     </section>
 
     <section class="step inactive" id="s-pruefen" aria-labelledby="h-pruefen">
       <h2 id="h-pruefen"><b>3</b>Prüfen</h2>
+      <div class="seg" id="familie" role="radiogroup" aria-label="Dauer- oder Kurzzeitzählungen" hidden></div>
       <div class="seg" id="filter" role="radiogroup" aria-label="Welche Stellen die Liste zeigt"></div>
       <ul class="liste" id="liste" aria-label="Zählstellen"></ul>
       <div class="row">
@@ -462,6 +519,11 @@ code { font: 0.92em var(--font-mono); }
         <button type="button" class="btn secondary" id="counts-gz" disabled>.xml.gz</button>
         <button type="button" class="btn secondary" id="zuordnung-csv" disabled>Zuordnung (CSV)</button>
       </div>
+      <div class="row" id="kurz-export" hidden>
+        <button type="button" class="btn" id="kurz-xml" disabled>counts-kurzzeit.xml</button>
+        <button type="button" class="btn secondary" id="kurz-gz" disabled>.xml.gz</button>
+        <span class="note">Kurzzeitzählungen: je Messstelle ein Tag, nur die gezählten Stunden. Nach Stunden vergleichen, nicht über den Tag.</span>
+      </div>
       <p class="note" id="osm-export" hidden>Aus einem OSM-Auszug gibt es keine <code>counts.xml</code>: Die Kanten gehören zu keinem MATSim-Netz. Die Zuordnung (CSV) trägt je Stelle den Punkt auf der Straße, die Richtung und den OSM-Weg; mit einem MATSim-Netz geladen, wird sie dort übernommen.</p>
       <p class="note">Die Zuordnung ist eine CSV im Format von MATSims <code>--counts-mapping</code>: Station, <code>linkid</code>, <code>using</code>, Kommentar, dazu wie der Link zustande kam und sein Anker – der Punkt auf dem Link, seine Richtung und der OSM-Weg. Wieder eingelesen, auch zu einem anderen Netz oder aus OSM, überträgt sie die geprüften Links über den Anker: gleiche Link-ID am selben Ort, gleicher OSM-Weg in derselben Richtung oder der einzige passende Link am Punkt. Was so nicht eindeutig ist, kommt zum Prüfen; ausgelassene Stellen bleiben ausgelassen.
         <label class="linkbtn">Zuordnung laden<input type="file" id="csv-file" class="visually-hidden" accept=".csv,text/csv"></label></p>
@@ -474,7 +536,7 @@ code { font: 0.92em var(--font-mono); }
     </section>
 
     <footer class="foot">
-      <p>Daten: <a href="https://github.com/vizsim-lab/zaehlkarte" target="_blank" rel="noopener">Zählkarte</a> (Dauerzählstellen). Netz lesen wie in <a href="https://github.com/vizsim-lab/kachelwerk" target="_blank" rel="noopener">kachelwerk</a>, Karte mit <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre GL JS</a> und <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a>, Umrechnung mit <a href="https://github.com/proj4js/proj4js" target="_blank" rel="noopener">proj4js</a>.</p>
+      <p>Daten: <a href="https://github.com/vizsim-lab/zaehlkarte" target="_blank" rel="noopener">Zählkarte</a> (Dauerzählstellen, Kurzzeitzählungen je Strom). Netz lesen wie in <a href="https://github.com/vizsim-lab/kachelwerk" target="_blank" rel="noopener">kachelwerk</a>, Karte mit <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre GL JS</a> und <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a>, Umrechnung mit <a href="https://github.com/proj4js/proj4js" target="_blank" rel="noopener">proj4js</a>.</p>
       <p><a href="https://github.com/vizsim-lab/matsim-counts-snapper" target="_blank" rel="noopener">Quellcode</a> und <a href="https://github.com/vizsim-lab/matsim-counts-snapper/blob/main/THIRD_PARTY_LICENSES.md" target="_blank" rel="noopener">Lizenzen</a> auf GitHub.</p>
     </footer>
   </aside>
@@ -496,6 +558,7 @@ code { font: 0.92em var(--font-mono); }
       <span class="lg"><i style="--c: var(--st-geprueft)"></i>geprüft</span>
       <span class="lg"><i style="--c: var(--st-ohne)"></i>ohne Link</span>
       <span class="lg"><i style="--c: var(--st-aus)"></i>ausgelassen</span>
+      <span class="lg" id="legend-kurz" hidden><i class="ring" style="--c: var(--fg)"></i>Kurzzeitzählung</span>
       <span class="lg"><i class="ln dash" style="--c: var(--fg)"></i>Kandidaten</span>
     </div>
   </main>

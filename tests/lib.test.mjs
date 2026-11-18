@@ -303,8 +303,8 @@ test("counts: XML nach counts_v2 und Zuordnung als CSV", () => {
     { station: "berlin_viz:TE001", linkid: "ab", using: true, kommentar: 'passt; "sicher"', zuordnung: "geprüft", abstand_m: 3.5, richtung: "SW", name: "A115", quelle: "berlin_viz" },
     { station: "berlin_viz:TE002", linkid: "", using: false, kommentar: "", zuordnung: "ausgelassen", abstand_m: null, richtung: "NO", name: "A115", quelle: "berlin_viz" },
   ]);
-  assert.equal(csv.split("\n")[0], "station;linkid;using;kommentar;zuordnung;abstand_m;richtung;name;quelle;anker_lon;anker_lat;anker_grad;osm_weg;netz");
-  assert.equal(csv.split("\n")[1], 'berlin_viz:TE001;ab;y;"passt; ""sicher""";geprüft;3.5;SW;A115;berlin_viz;;;;;');
+  assert.equal(csv.split("\n")[0], "station;linkid;using;kommentar;zuordnung;abstand_m;richtung;name;quelle;anker_lon;anker_lat;anker_grad;osm_weg;netz;zaehlart");
+  assert.equal(csv.split("\n")[1], 'berlin_viz:TE001;ab;y;"passt; ""sicher""";geprüft;3.5;SW;A115;berlin_viz;;;;;;');
   assert.deepEqual(leseZuordnungCsv(csv), [
     { station: "berlin_viz:TE001", linkid: "ab", using: true, kommentar: 'passt; "sicher"', zuordnung: "geprüft", anker: null, weg: null, netz: null },
     { station: "berlin_viz:TE002", linkid: "", using: false, kommentar: "", zuordnung: "ausgelassen", anker: null, weg: null, netz: null },

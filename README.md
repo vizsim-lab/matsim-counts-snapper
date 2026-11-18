@@ -2,7 +2,9 @@
 
 Statische Seite, die Dauerzählstellen der [Zählkarte](https://github.com/vizsim-lab/zaehlkarte)
 auf die Links eines MATSim-Netzes legt, ihre Stundenwerte über gewählte Tage mittelt und eine
-`counts.xml` im Format `counts_v2` schreibt. Geprüft werden kann auch auf einem OSM-Auszug
+`counts.xml` im Format `counts_v2` schreibt. Wahlweise kommen Kurzzeitzählungen dazu, je Knotenarm
+als Zu- und Ausfahrt und je Querschnitt als Fahrtrichtung, in eine eigene `counts-kurzzeit.xml`
+(siehe [unten](#kurzzeitzählungen)). Geprüft werden kann auch auf einem OSM-Auszug
 (`.osm.pbf`): Die Zuordnung trägt dann einen Anker, der sich auf jede Version eines MATSim-Netzes
 übertragen lässt, statt nach jeder Überarbeitung des Netzes neu zu prüfen. Alles läuft im Browser;
 ein Server ist nicht nötig, und eigene Dateien verlassen den Rechner nicht.
@@ -22,6 +24,7 @@ Detektoren der Verkehrsinformationszentrale.
    zählen und aus einer Quelle mit Lizenz stammen. Je Gruppe der Zählkarte (`kfz`, `lkw`, `sv`,
    `rad`, `fuss`) lässt sich wählen, ob sie mitkommt, unter welchem `networkMode` sie in die
    counts.xml geht und welche Modi ihr Link erlauben muss. Vorgabe: Kfz als `car`, Rad als `bike`.
+   Darunter lassen sich die Kurzzeitzählungen dazunehmen.
 3. **Prüfen:** Für jede Stelle sucht die Seite Links im Umkreis (Vorgabe 50 m), die das
    Verkehrsmittel erlauben und deren Richtung höchstens 60° von der Fahrtrichtung der Stelle
    abweicht (liegt keiner so nah, der nächste unter 90°, zum Prüfen). Der nächste gewinnt; jeder Link geht je Verkehrsmittel nur an eine Stelle, das beste
@@ -32,8 +35,8 @@ Detektoren der Verkehrsinformationszentrale.
    Schultage, Ferien- oder Feiertage nach dem Ferienkalender der Zählkarte; als Mittel oder Median,
    mit einer Mindestzahl an Tagen je Stunde. Vorgabe wie MATSims `CreateCountsFromBAStData`:
    Dienstag bis Donnerstag, Mittel, dazu nur Schultage und mindestens 5 Tage.
-5. **Ausgeben:** `counts.xml` oder `.xml.gz`, dazu die Zuordnung als CSV (bei einem OSM-Auszug
-   nur sie).
+5. **Ausgeben:** `counts.xml` oder `.xml.gz`, mit Kurzzeitzählungen dazu `counts-kurzzeit.xml`,
+   und die Zuordnung als CSV (bei einem OSM-Auszug nur sie).
 
 ### Welche Stellen zum Prüfen markiert sind
 
@@ -121,13 +124,14 @@ Die Seite liest `dauer/index.json` und, für die Stundenwerte, `dauer/{n}.json` 
 reichen dort je Quelle über ihre jüngsten 12 Monate, also je Quelle über einen anderen Zeitraum:
 bei den Berliner Detektoren etwa Juli 2024 bis Juni 2025, bei den Berliner Rad-Zählstellen das
 Jahr 2025 (die Quelle ergänzt einmal im Jahr). Ohne Angabe von „von“ und „bis“ nimmt die Seite für
-jede Stelle alle Tage, die sie hat; ein gemeinsamer Zeitraum lässt sich einstellen.
+jede Stelle alle Tage, die sie hat; ein gemeinsamer Zeitraum lässt sich einstellen. Für die
+Kurzzeitzählungen liest sie `manifest.json` (Lizenzen der Lieferungen, welche Jahre es gibt),
+`index.json` (Lage, Name und Art der Stellen) und je Quelle und Jahr `stroeme/{quelle}-{jahr}.json`
+(Version 1 dieser Dateien), nur die Jahre der Auswahl.
 
-Kurzzeitzählungen bleiben draußen: Die Zählkarte veröffentlicht sie als Summe über alle
-Richtungen, und eine MATSim-Messstelle hängt an genau einem gerichteten Link. Aus demselben Grund
-fehlen die meisten Rad-Zählstellen, die beide Richtungen zusammen zählen. Gerichtet sind etwa die
-Berliner Detektoren, die Dauerzählstellen in Baden-Württemberg und Bayern und ein Teil der
-Hamburger Stellen.
+Eine MATSim-Messstelle hängt an genau einem gerichteten Link. Darum fehlen die meisten
+Rad-Zählstellen, die beide Richtungen zusammen zählen. Gerichtet sind etwa die Berliner Detektoren,
+die Dauerzählstellen in Baden-Württemberg und Bayern und ein Teil der Hamburger Stellen.
 
 Die Berliner Rad-Zählstellen nennen ihre Richtung in den Daten bis November 2026 nicht im Feld
 `richtung`, sondern im Namen („Jannowitzbrücke Nord“) oder in der Kennung („01-MI-AL-W“). Berlin
@@ -139,6 +143,57 @@ die übrigen nennen keine Richtung. Die Zählkarte füllt das Feld künftig selb
 Die Zählkarte rechnet nichts um und füllt nichts auf; das gilt hier auch: Nicht gezählte Stunden
 bleiben leer, Tage mit doppelter Stunde 2–3 Uhr (Zeitumstellung) bleiben draußen, und es gibt
 keine Hochrechnung. Berlins `lkw` ist die Klasse des Detektors, nicht der Schwerverkehr.
+
+## Kurzzeitzählungen
+
+Berlin zählt an Tausenden Knoten und Querschnitten von Hand, je Stelle an einem Tag, meist von 7
+bis 19 Uhr. Das ist eine Momentaufnahme, aber das Netz der Stellen ist so dicht wie keine
+Dauerzählung. Die Zählkarte gibt die Werte je Strom aus (`stroeme/{quelle}-{jahr}.json`, ab
+[zaehlkarte#45](https://github.com/vizsim-lab/zaehlkarte/pull/45)), je Strom von Arm zu Arm, und
+den Winkel jedes Arms. Daraus macht die Seite Punkte mit Richtung:
+
+- **Knoten:** je Arm eine **Zufahrt** (die Summe der Ströme vom Arm, Richtung zum Knoten hin) und
+  eine **Ausfahrt** (die Summe der Ströme zum Arm, vom Knoten weg), beide 25 m vom Knoten auf dem
+  Arm (einstellbar). Eine Wende zählt in beiden. Ein Arm-Punkt sucht Links nur bis 5 m vor den
+  Knoten, sonst fände er die Links der anderen Arme. Ein Arm ohne Winkel bekommt keine Punkte.
+- **Querschnitt:** je Fahrtrichtung ein Punkt an der Stelle, Richtung zum Arm, zu dem es geht.
+  Nennt die Zählung für ihn keinen Winkel, gilt die Gegenrichtung des Arms, von dem es kommt;
+  sonst bleibt der Punkt ohne Richtung und kommt zum Prüfen (ein Knopf tauscht die Links der beiden
+  Richtungen).
+- Jeder Punkt liegt 3 m rechts seiner Fahrtrichtung, wie im Rechtsverkehr: Zufahrt und Ausfahrt
+  liegen nicht aufeinander, und bei getrennten Fahrbahnen liegt der Punkt näher an der richtigen.
+- Die Richtung des Links darf wie bei den Dauerzählstellen höchstens 60° abweichen, aber ohne den
+  Rückfall auf Links unter 90°: Die Winkel der Arme sind genauer als die Himmelsrichtungen der
+  Dauerzählstellen (an den Berliner Armen mit Himmelsrichtung im Namen liegen 98 % höchstens 45°
+  neben ihr).
+
+**Welche Zählung.** Je Stelle und Gruppe die jüngste, die passt: Jahre (Vorgabe ab 2019),
+Wochentage (Vorgabe Dienstag bis Donnerstag), für Montag bis Freitag die Art des Tages aus dem
+Ferienkalender der Zählkarte (Vorgabe Schultage) und mindestens so viele gezählte Stunden der Gruppe
+(Vorgabe 12, das Fenster 7–19 Uhr). Vorgabe ist nur Kfz: Rad schwankt an einem einzelnen Tag
+stärker. Liegen am selben Tag zwei Zählungen an einer Stelle (Berlin legt manche in zwei Dateien
+ab, 7–9 und 15–18 Uhr, oder je Gehweg eine), gilt die mit mehr gezählten Stunden; die andere nennt
+die Seite. Eine Stunde ist nur gezählt, wenn jeder Strom des Punkts einen Wert hat; nichts wird
+aufgefüllt, hochgerechnet oder über Tage gemittelt.
+
+**Wie stark ein Tag streut**, an den Berliner Dauerzählstellen gemessen (ein Schultag Di–Do,
+7–19 Uhr, gegen das Mittel aller Schultage der Stelle): Kfz im Median 6 %, an 90 % der Tage
+höchstens 24 %; Rad im Median 21 %, höchstens 45 %.
+
+**Dauerzählstellen gehen vor.** Erst bekommen die Dauerzählstellen ihre Links, dann die
+Kurzzeit-Punkte die übrigen; je Link und Verkehrsmittel trägt jede Familie eine Stelle. Von Hand
+darf ein Kurzzeit-Punkt auch auf den Link einer Dauerzählstelle; die Seite sagt es dann, und beide
+gehen in ihre eigene Datei.
+
+**Lieferungen und Lizenzen.** Berlin hat zweimal geliefert: 2019–2025 unter dl-de/by-2-0, 1990–2019
+unter CC BY-SA 3.0 DE. Lieferungen unter CC BY-SA sind aus, bis man sie einschaltet: Deren
+Bedingung, die Weitergabe unter gleicher Lizenz, gälte für die ganze Datei. Ist die Lage einer
+Stelle aus OpenStreetMap geokodiert (Straßenkreuzung, vor allem bei älteren Zählungen), kommt die
+ODbL dazu; der Punkt kann dann an der Kreuzung liegen statt an der Zählstelle.
+
+**Die Liste** zeigt mit Kurzzeitzählungen schnell Tausende Punkte. Ein Filter wählt Dauer oder
+Kurzzeit; angezeigt werden die ersten 400, die gewählte Stelle immer. Auf der Karte sind
+Kurzzeit-Punkte Ringe, gestrichelt mit ihrem Knoten verbunden.
 
 ## Ausgabe
 
@@ -166,19 +221,44 @@ Teilen sich eine Kfz- und eine Rad-Stelle einen Link, stehen beide in einer Mess
 `stellen` mit beiden Kennungen, und die Angaben jeder Stelle tragen ihr Verkehrsmittel als Endung
 (`quelle_bike`, `quelle_car`, `abstand_m_car`, …).
 
+### counts-kurzzeit.xml
+
+Gleicher Aufbau, aber je Messstelle ein gezählter Tag: nur die gezählten Stunden, `t` ist der Beginn
+der Stunde. `counts_v2` erlaubt Attribute nur je Messstelle, nicht je Messung; dort steht, was die
+Werte sind:
+
+| Attribut | Beispiel |
+| --- | --- |
+| `zaehlart` | `kurzzeit` (auch an der Datei) |
+| `stelle`, `zaehlung` | `berlin:K2`, `K0000002_20231019` |
+| `datum`, `wochentag`, `tagtyp` | `2023-10-19`, `Do`, `Schultag` |
+| `fenster` | `7–19` |
+| `art`, `arm`, `seite` | `Knoten`, `1 Oranienburger Chaussee (NW)`, `Ausfahrt` |
+| `stroeme`, `richtung_grad` | `2→1, 3→1, 4→1`, `325` |
+| `quelle`, `lizenz`, `lage` | `berlin`, `dl-de/by-2-0`, `gps` |
+| `abstand_m`, `abweichung_grad`, `zuordnung`, `kommentar` | wie in der counts.xml |
+
+MATSim liest die Attribute, beachtet sie aber nicht. Darum eine eigene Datei: Eine Tagessumme ist
+hier nur die Summe des Zählfensters, also nach Stunden vergleichen, nicht über den Tag. Teilen sich
+zwei Punkte einen Link (etwa Kfz aus einer Zählung, Rad aus einer anderen), stehen sie wie bei den
+Dauerzählstellen in einer Messstelle.
+
 ### Zuordnung als CSV
 
 Getrennt mit `;`, im Format von MATSims `CountsOptions` (`--counts-mapping`):
 
 ```
-station;linkid;using;kommentar;zuordnung;abstand_m;richtung;name;quelle;anker_lon;anker_lat;anker_grad;osm_weg;netz
-berlin_viz:TE010;7279;y;;geprüft;49.2;Richtung stadtauswärts (Südwest);Marienfelder Allee;berlin_viz;13.3712345;52.4123456;214;;berlin-network.xml.gz
+station;linkid;using;kommentar;zuordnung;abstand_m;richtung;name;quelle;anker_lon;anker_lat;anker_grad;osm_weg;netz;zaehlart
+berlin_viz:TE010;7279;y;;geprüft;49.2;Richtung stadtauswärts (Südwest);Marienfelder Allee;berlin_viz;13.3712345;52.4123456;214;;berlin-network.xml.gz;dauer
+berlin:K2/K0000002_20231019/1aus;2422;y;;geprüft;0.4;Ausfahrt in Arm 1 „Oranienburger Chaussee (NW)“;Oranienburger Ch. / Zeltinger Straße- Rauentaler Straße- Am Pilz;berlin;13.3013037;52.6434265;330;;berlin-network.xml.gz;kurzzeit
 ```
 
 `using` ist `y` für jede Stelle mit Link und leer für ausgelassene. `zuordnung` sagt, wie der Link
 zustande kam: `geprüft`, `automatisch`, `ausgelassen` oder `ohne Link`. Dahinter der Anker: Punkt
 auf dem Link (WGS 84), Richtung des Links dort (Grad ab Nord), OSM-Weg und das Netz, zu dem die
-`linkid` gehört. MATSim übergeht diese Spalten. Wieder eingelesen überträgt die CSV die geprüften
+`linkid` gehört, und `zaehlart` (`dauer` oder `kurzzeit`; ein Kurzzeit-Punkt heißt
+`Stelle/Zählung/Arm`, etwa `…/1zu` für die Zufahrt aus Arm 1 und `…/nach2` für die Richtung zu Arm 2
+eines Querschnitts). MATSim übergeht diese Spalten. Wieder eingelesen überträgt die CSV die geprüften
 Links über den Anker (siehe oben) und stellt die ausgelassenen Stellen her; die übrigen sucht die
 Seite neu. Eine CSV ohne die Spalte `zuordnung`, etwa `input/counts_mapping.csv` aus dem Berliner
 Szenario, gilt ganz, so wie MATSim sie liest.
@@ -189,6 +269,8 @@ In die Ausgabe kommen nur Quellen mit Lizenz, wie beim CSV-Export der Zählkarte
 Bedingungen gelten auch für die counts.xml; unter den gerichteten Quellen ist das vor allem
 CC BY-NC 4.0 bei Ettlingen, die übrigen stehen unter dl-de/by-2-0 oder GeoNutzV. Die Seite zeigt
 die Lizenzen der Stellen, die hineingehen, markiert Einschränkungen und schreibt alles in die Datei.
+Bei den Kurzzeitzählungen gilt die Lizenz der Lieferung, dazu die ODbL, wo die Lage aus
+OpenStreetMap geokodiert ist (siehe oben).
 
 ## Adresse
 
@@ -200,7 +282,8 @@ Die Adresszeile zeigt auf das geladene Netz und lässt sich teilen, zum Beispiel
 - `geo`: die Geometrie-Datei, vom Ordner des Netzes aus oder als volle Adresse, `0` für keine;
   fehlt der Parameter, sucht die Seite neben dem Netz und im `input`-Ordner seines Szenarios
 - `crs`: nur nötig, wenn das Netz keins nennt und es nicht `EPSG:25832` ist
-- `daten`: ein anderer Ort für die Daten der Zählkarte (Ordner mit `dauer/`)
+- `daten`: ein anderer Ort für die Daten der Zählkarte (Ordner mit `dauer/`, für die
+  Kurzzeitzählungen mit `manifest.json`, `index.json` und `stroeme/`)
 
 ## Hosten
 
@@ -211,7 +294,8 @@ python3 -m http.server 8000   # dann http://localhost:8000
 ```
 
 GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zählkarte
-(`vizsim-lab.github.io`), das Beispielnetz (`raw.githubusercontent.com`), Netze aus dem VSP-SVN
+(`vizsim-lab.github.io`; die Kurzzeitzählungen nur, wenn sie an sind: `manifest.json`,
+`index.json`, je Jahr eine Datei der Ströme), das Beispielnetz (`raw.githubusercontent.com`), Netze aus dem VSP-SVN
 (`svn.vsp.tu-berlin.de`) und die Hintergrundkarte (`tiles.openfreemap.org`, außer bei „Ohne“).
 
 ## Dateien
@@ -226,6 +310,8 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
 - `lib/zuordnung.js`: Raster über die Links, Kandidaten, jeder Link nur einmal
 - `lib/richtung.js`: die Richtung aus dem Text der Zählkarte
 - `lib/zaehlkarte.js`: `dauer/index.json` und die Stundenwerte lesen, Ferienkalender
+- `lib/kurzzeit.js`: Kurzzeitzählungen je Strom, jüngste Zählung je Stelle, Punkte der Arme und
+  Fahrtrichtungen, Lizenz je Lieferung
 - `lib/mitteln.js`: Tage wählen, Mittel oder Median
 - `lib/counts.js`: counts.xml schreiben, Zuordnungs-CSV schreiben und lesen
 - `vendor/`: MapLibre GL JS, proj4, Schriften
@@ -233,7 +319,11 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
 
 ## Offen
 
-- Kurzzeitzählungen, sobald die Zählkarte Werte je Richtung und Knotenarm ausgibt
+- Kurzzeitzählungen: Querschnitte, deren Lage an einer Kreuzung geokodiert ist, liegen dort statt
+  an der Zählstelle („südl. Bäkestraße“); Arme mit mehreren Links (Doppelfahrbahn mit
+  Abbiegestreifen, SUMO-Knotencluster); Zählungen, die Berlin am selben Tag in zwei Dateien ablegt,
+  zusammenführen; wahlweise in dieselbe Datei wie die Dauerzählstellen
+- Kurzzeitzählungen anderer Städte, sobald die Zählkarte sie je Strom ausgibt (bisher nur Berlin)
 - Stellen, die beide Richtungen zusammen zählen
 - Stundenwerte über ganze Jahre (die Zählkarte gibt für die Karte nur die jüngsten 12 Monate aus)
 - die Sonderregel für die Berliner Rad-Zählstellen streichen, sobald die Zählkarte das Feld

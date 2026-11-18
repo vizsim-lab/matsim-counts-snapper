@@ -222,7 +222,7 @@ test("Zuordnungs-CSV trägt den Anker hin und zurück", () => {
     { station: "berlin_rad:02-MI-JAN-N", linkid: "-123#0", using: true, zuordnung: "geprüft", abstand_m: 4.2, richtung: "Richtung Norden", name: "Jannowitzbrücke", quelle: "berlin_rad", anker_lon: "13.4178350", anker_lat: "52.5139320", anker_grad: 2, osm_weg: "-123", netz: "berlin.osm.pbf" },
     { station: "x:1", linkid: "", using: false, zuordnung: "ausgelassen" },
   ]);
-  assert.match(csv.split("\n")[0], /;anker_lon;anker_lat;anker_grad;osm_weg;netz$/);
+  assert.match(csv.split("\n")[0], /;anker_lon;anker_lat;anker_grad;osm_weg;netz;zaehlart$/);
   const [a, b] = leseZuordnungCsv(csv);
   assert.deepEqual(a.anker, { lon: 13.417835, lat: 52.513932, grad: 2 });
   assert.equal(a.weg, "-123");

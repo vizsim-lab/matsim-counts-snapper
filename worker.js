@@ -206,6 +206,7 @@ async function ladeNetz(job) {
   );
 }
 
+/** Das Raster über die Links; eine Zelle ist so groß wie der Umkreis, mindestens 50 m. */
 function raster(radius) {
   if (!netz.index || netz.index.zelle !== Math.max(50, radius)) {
     status("Links in ein Raster legen …");
@@ -224,7 +225,7 @@ function suche(job) {
     const [mx, my] = netz.meter ? netz.meter.hin(x, y) : [x, y];
     const umkreis = { links: 0, modus: 0 };
     const liste = Number.isFinite(mx) && Number.isFinite(my)
-      ? kandidaten(netz.index, { x: mx, y: my, grad: s.grad, name: s.name, modi: s.modi }, p, umkreis)
+      ? kandidaten(netz.index, { x: mx, y: my, grad: s.grad, name: s.name, modi: s.modi, radius: s.radius ?? undefined, rueckfall: s.rueckfall }, p, umkreis)
       : [];
     return {
       id: s.id,
