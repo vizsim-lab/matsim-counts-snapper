@@ -231,7 +231,7 @@ function suche(job) {
       x,
       y,
       umkreis,
-      kandidaten: liste.map((k) => ({ ...steckbrief(k.i), d: k.d, abweichung: k.abweichung, grad: k.grad, anteil: k.anteil, namePasst: k.name, score: k.score })),
+      kandidaten: liste.map((k) => ({ ...steckbrief(k.i), d: k.d, abweichung: k.abweichung, grad: k.grad, anteil: k.anteil, namePasst: k.name, score: k.score, weit: Boolean(k.weit) })),
     };
   });
   postMessage({ type: "suche", token: job.token, ergebnisse });

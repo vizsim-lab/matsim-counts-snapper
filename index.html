@@ -60,7 +60,12 @@ body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 1
 code { font: 0.92em var(--font-mono); }
 
 .app { display: grid; grid-template-columns: minmax(340px, 430px) minmax(0, 1fr); height: 100%; }
+/* Breites Layout: nur die Seitenleiste scrollt, nie die Seite. Sonst schieben versteckte Elemente
+   (.visually-hidden, absolut gesetzt) die Seite über das Fenster hinaus, und beim Scrollen rutscht
+   alles nach oben – unten bleibt ein leerer Streifen. */
+@media (min-width: 861px) { html, body { overflow: hidden; } }
 .panel {
+  position: relative; /* hält absolut gesetzte Kinder (.visually-hidden) in der Seitenleiste */
   display: flex;
   flex-direction: column;
   gap: 22px;

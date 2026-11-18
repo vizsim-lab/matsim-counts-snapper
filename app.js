@@ -1065,6 +1065,19 @@ function verteileNeu() {
   });
   const wahl = verteile(kandidaten, fest, liste.map(ausgabeModi));
   state.wahl = new Map(liste.map((s, idx) => [s.id, wahl[idx]]));
+  // wer welchen Link hat: für die Gründe („vergeben an …“)
+  state.inhaber = new Map();
+  for (const s of liste) {
+    const l = linkVon(s);
+    if (l) state.inhaber.set(l.id, [...(state.inhaber.get(l.id) ?? []), s]);
+  }
+}
+
+/** Die anderen Stellen, die einen Link mit einem der Verkehrsmittel von `s` haben, als Text. */
+function inhaberText(linkId, s) {
+  const modi = ausgabeModi(s);
+  const andere = (state.inhaber?.get(linkId) ?? []).filter((t) => t.id !== s.id && ausgabeModi(t).some((m) => modi.includes(m)));
+  return andere.map((t) => `${t.name || t.id} (${t.id})`).join(", ");
 }
 
 /** Die networkModes, die eine Stelle ausgibt; ein Link trägt je Verkehrsmittel nur eine Stelle. */
@@ -1087,7 +1100,10 @@ function gruendeVon(s) {
     const e = state.entscheid.get(s.id);
     const vorab = e?.anker && !e.link ? [`Aus „${e.anker.netz ?? "einer Zuordnung"}“ nicht eindeutig übernommen (${e.anker.grund ?? "unklar"}).`] : [];
     if (vorab.length && !k.length) return [...vorab, "Im Umkreis des übernommenen Punkts liegt kein passender Link."];
-    if (k.length) return [...vorab, "Alle passenden Links im Umkreis sind an andere Stellen mit demselben Verkehrsmittel vergeben."];
+    if (k.length) {
+      const an = inhaberText(k[0].id, s);
+      return [...vorab, `Alle passenden Links im Umkreis sind an andere Stellen mit demselben Verkehrsmittel vergeben${an ? `, der nächste an ${an}` : ""}.`];
+    }
     const u = state.ergebnisse.get(s.id)?.umkreis;
     const r = Number($("radius").value) || 50;
     if (!u?.links) return [`Im Umkreis von ${de(r)} m liegt kein Link.`];
@@ -1099,8 +1115,12 @@ function gruendeVon(s) {
   if (e?.anker && !e.link) out.push(`Aus „${e.anker.netz ?? "einer Zuordnung"}“ nicht eindeutig übernommen (${e.anker.grund ?? "unklar"}). Gesucht wird vom übernommenen Punkt aus.`);
   if (s.r.grad == null && !e?.anker) out.push(`Die Quelle nennt nur das Ziel („${s.r.ziel}“), keine Himmelsrichtung: Hin- oder Rückrichtung prüfen.`);
   if (w.d > WEIT_M) out.push(`Der Link liegt ${de(w.d)} m ${e?.anker ? "vom übernommenen Punkt" : "von der Stelle"} entfernt.`);
-  if (w.abweichung != null && w.abweichung > WINKEL_PRUEFEN) out.push(`Die Richtung des Links weicht um ${de(w.abweichung)}° ab.`);
-  if (k[0] && k[0].i !== w.i) out.push("Der nächste Link ist an eine andere Stelle vergeben.");
+  if (w.weit) out.push(`Kein Link liegt innerhalb von ${de(Number($("winkel").value) || 60)}° der genannten Richtung (${kurz(s.r.grad)}). Dieser weicht ${de(w.abweichung)}° ab, liegt aber näher an ihr als seine Gegenrichtung – die Quelle nennt wohl nur eine grobe Himmelsrichtung.`);
+  else if (w.abweichung != null && w.abweichung > WINKEL_PRUEFEN) out.push(`Die Richtung des Links weicht um ${de(w.abweichung)}° ab.`);
+  if (k[0] && k[0].i !== w.i) {
+    const an = inhaberText(k[0].id, s);
+    out.push(`Der nächste Link ist an eine andere Stelle vergeben${an ? `: ${an}` : ""}.`);
+  }
   return out;
 }
 
@@ -1494,6 +1514,7 @@ function renderKarte() {
     <div><h3>${esc(s.name || s.id)}</h3>${s.abschnitt ? `<p class="sub">${esc(s.abschnitt)}</p>` : ""}</div>
     <div class="meta">${kompassSvg(s.r.grad)}<span>${esc(richtungsText(s))}</span></div>
     <div class="meta"><span>${esc(s.id)}</span>·<span>${esc(q.name)}</span>·<span>${lizenz}</span>·<span>${s.gruppen.map((g) => esc(state.daten.gruppenNamen[g] ?? g)).join(", ")}</span></div>
+    ${state.stunden.get(s.id)?.fahrstreifen?.length ? `<div class="meta"><span>Fahrstreifen: ${esc(state.stunden.get(s.id).fahrstreifen.join(", "))}</span></div>` : ""}
     <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE[lage]})">${esc(LAGE_TEXT[lage])}${e?.uebernommen && e.link ? " · übernommen" : e?.link && kand[0]?.id !== e.link.id ? " · von Hand" : ""}</span></div>
     ${e?.uebernommen && e.link ? `<p class="note">Übernommen aus „${esc(e.uebernommen.netz ?? "einer Zuordnung")}“: ${esc(WIE[e.uebernommen.wie] ?? e.uebernommen.wie)}${e.uebernommen.d != null ? `, ${de(e.uebernommen.d, 1)} m vom übernommenen Punkt` : ""}.</p>` : ""}
     ${gruende.length ? `<ul class="gruende">${gruende.map((g) => `<li>${esc(g)}</li>`).join("")}</ul>` : ""}

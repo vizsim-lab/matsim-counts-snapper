@@ -24,7 +24,7 @@ Detektoren der Verkehrsinformationszentrale.
    counts.xml geht und welche Modi ihr Link erlauben muss. Vorgabe: Kfz als `car`, Rad als `bike`.
 3. **Prüfen:** Für jede Stelle sucht die Seite Links im Umkreis (Vorgabe 50 m), die das
    Verkehrsmittel erlauben und deren Richtung höchstens 60° von der Fahrtrichtung der Stelle
-   abweicht. Der nächste gewinnt; jeder Link geht je Verkehrsmittel nur an eine Stelle, das beste
+   abweicht (liegt keiner so nah, der nächste unter 90°, zum Prüfen). Der nächste gewinnt; jeder Link geht je Verkehrsmittel nur an eine Stelle, das beste
    Paar zuerst. Eine Kfz- und eine Rad-Stelle dürfen sich also einen Link teilen.
    Ein passender Straßenname zählt wie 10 m weniger Abstand. Auf der Karte und in der Liste lässt
    sich jede Zuordnung bestätigen, durch einen anderen Link ersetzen oder auslassen.
@@ -40,7 +40,13 @@ Detektoren der Verkehrsinformationszentrale.
 - Die Quelle nennt nur ein Ziel („Richtung Lindau“) und keine Himmelsrichtung. Liegen zwei solche
   Stellen am selben Ort (je Fahrtrichtung eine), tauscht ein Knopf ihre Links.
 - Der Link liegt mehr als 20 m entfernt, oder seine Richtung weicht mehr als 35° ab.
-- Der nächste Link ist an eine andere Stelle vergeben.
+- Kein Link liegt innerhalb der 60° um die genannte Richtung. Dann nimmt die Seite den nächsten
+  unter 90°: Er liegt näher an der genannten Richtung als seine Gegenrichtung, und viele Quellen
+  nennen nur eine grobe Himmelsrichtung (die Berliner Detektoren etwa „Ost“ an der Potsdamer
+  Straße, die dort nach Nordnordost läuft).
+- Der nächste Link ist an eine andere Stelle vergeben; die Seite nennt sie. Oft ist das ein
+  zweiter Messquerschnitt derselben Richtung, etwa die Busspur neben der Hauptfahrbahn – die
+  Fahrstreifen stehen bei der Stelle.
 
 Tasten: `n` nächste Stelle zum Prüfen, `p` passt, `w` Link auf der Karte wählen, `a` auslassen,
 `Esc` bricht das Wählen ab. Liegen an einer Stelle der Karte mehrere Links übereinander (Hin- und

@@ -113,6 +113,32 @@ test("zuordnung: Richtung entscheidet zwischen Hin- und Rückrichtung", async ()
   assert.equal(erlaubt({ modes: "pt,bus" }, ["car"]), false);
 });
 
+test("zuordnung: grobe Himmelsrichtung – unter 90° als Rückfall zum Prüfen", () => {
+  // eine Straße nach Nordnordost (24°) und zurück; die Quelle sagt „Ost“ (90°): 66° daneben
+  const rad = (g) => (g * Math.PI) / 180;
+  const hin = [0, 0, 100 * Math.sin(rad(24)), 100 * Math.cos(rad(24))];
+  const links = [
+    { id: "hin", modes: "car", xy: Float64Array.from(hin) },
+    { id: "rueck", modes: "car", xy: Float64Array.from([hin[2] + 3, hin[3], 3, 0]) },
+  ];
+  const index = new LinkIndex(links, 50);
+  const p = { radius: 30, maxWinkel: 60, winkelGewicht: 0.3, nameBonus: 10, maxKandidaten: 6 };
+  const info = {};
+  const k = kandidaten(index, { x: 25, y: 45, grad: 90, name: null, modi: ["car"] }, p, info);
+  assert.deepEqual(k.map((x) => links[x.i].id), ["hin"], "nur die Richtung unter 90°");
+  assert.equal(k[0].weit, true);
+  assert.ok(Math.abs(k[0].abweichung - 66) < 0.5);
+  assert.equal(info.weit, 1);
+  // liegt ein Link innerhalb von 60°, bleibt es beim Bisherigen
+  const quer = [...links, { id: "quer", modes: "car", xy: Float64Array.from([0, 40, 60, 40]) }];
+  const k2 = kandidaten(new LinkIndex(quer, 50), { x: 25, y: 45, grad: 90, name: null, modi: ["car"] }, p);
+  assert.deepEqual(k2.map((x) => quer[x.i].id), ["quer"]);
+  assert.equal(k2[0].weit, false);
+  // genau quer zur Straße (Westnordwest-Ostsüdost ist 90° zu beiden): keiner
+  const k3 = kandidaten(index, { x: 25, y: 45, grad: 114, name: null, modi: ["car"] }, p);
+  assert.deepEqual(k3, []);
+});
+
 test("zuordnung: jeder Link nur einmal, Zuordnungen von Hand gehen vor", () => {
   const k = (i, score) => ({ i, d: score, score });
   const alle = [
