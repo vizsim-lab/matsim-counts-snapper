@@ -21,7 +21,8 @@ Detektoren der Verkehrsinformationszentrale.
    aus dem Netz-Attribut `coordinateReferenceSystem`, sonst aus dem Formular. Oder ein OSM-Auszug
    (`.osm.pbf`), siehe [unten](#osm-auszug-und-übernahme-auf-ein-anderes-netz).
 2. **Zählstellen:** die Dauerzählstellen der Zählkarte im Gebiet des Netzes, die eine Richtung
-   zählen und aus einer Quelle mit Lizenz stammen. Je Gruppe der Zählkarte (`kfz`, `lkw`, `sv`,
+   zählen und aus einer Quelle mit Lizenz stammen; die ohne Richtung nur zum Ansehen (siehe
+   [unten](#daten-der-zählkarte)). Je Gruppe der Zählkarte (`kfz`, `lkw`, `sv`,
    `rad`, `fuss`) lässt sich wählen, ob sie mitkommt, unter welchem `networkMode` sie in die
    counts.xml geht und welche Modi ihr Link erlauben muss. Vorgabe: Kfz als `car`, Rad als `bike`.
    Darunter lassen sich die Kurzzeitzählungen dazunehmen.
@@ -129,9 +130,13 @@ Kurzzeitzählungen liest sie `manifest.json` (Lizenzen der Lieferungen, welche J
 `index.json` (Lage, Name und Art der Stellen) und je Quelle und Jahr `stroeme/{quelle}-{jahr}.json`
 (Version 1 dieser Dateien), nur die Jahre der Auswahl.
 
-Eine MATSim-Messstelle hängt an genau einem gerichteten Link. Darum fehlen die meisten
-Rad-Zählstellen, die beide Richtungen zusammen zählen. Gerichtet sind etwa die Berliner Detektoren,
-die Dauerzählstellen in Baden-Württemberg und Bayern und ein Teil der Hamburger Stellen.
+Eine MATSim-Messstelle hängt an genau einem gerichteten Link. Stellen, die beide Richtungen
+zusammen zählen oder keine nennen (die meisten Rad-Zählstellen, in Berlin etwa der Schwedter Steg),
+passen auf keinen. Die Seite zeigt sie trotzdem: violett auf der Karte, in der Liste unter „Beide
+Richtungen“, mit ihrem Tagesgang (der Summe beider Richtungen). Sie sucht für sie aber keinen Link,
+und sie gehen weder in die counts.xml noch in die Zuordnung. Gerichtet sind etwa die Berliner
+Detektoren, die Dauerzählstellen in Baden-Württemberg und Bayern und ein Teil der Hamburger
+Stellen.
 
 Die Berliner Rad-Zählstellen nennen ihre Richtung in den Daten bis November 2026 nicht im Feld
 `richtung`, sondern im Namen („Jannowitzbrücke Nord“) oder in der Kennung („01-MI-AL-W“). Berlin
@@ -324,7 +329,8 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
   Abbiegestreifen, SUMO-Knotencluster); Zählungen, die Berlin am selben Tag in zwei Dateien ablegt,
   zusammenführen; wahlweise in dieselbe Datei wie die Dauerzählstellen
 - Kurzzeitzählungen anderer Städte, sobald die Zählkarte sie je Strom ausgibt (bisher nur Berlin)
-- Stellen, die beide Richtungen zusammen zählen
+- Stellen, die beide Richtungen zusammen zählen, zuordnen: beide Links und die gezählte Summe,
+  für eine eigene Auswertung (MATSims Vergleich kennt keine Summe über zwei Links)
 - Stundenwerte über ganze Jahre (die Zählkarte gibt für die Karte nur die jüngsten 12 Monate aus)
 - die Sonderregel für die Berliner Rad-Zählstellen streichen, sobald die Zählkarte das Feld
   `richtung` füllt (zaehlkarte#44) und neu gebaut hat

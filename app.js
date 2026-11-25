@@ -35,9 +35,10 @@ const BEISPIEL = {
   crs: "EPSG:31468",
   name: "berlin-network.xml.gz",
 };
-const LAGEN = ["pruefen", "ohne", "passt", "geprueft", "aus"];
-const LAGE_TEXT = { passt: "passt", pruefen: "prüfen", geprueft: "geprüft", ohne: "ohne Link", aus: "ausgelassen" };
-const LAGE_FARBE = { passt: "--st-passt", pruefen: "--st-pruefen", geprueft: "--st-geprueft", ohne: "--st-ohne", aus: "--st-aus" };
+const LAGEN = ["pruefen", "ohne", "passt", "geprueft", "aus", "quer"];
+// „quer“: eine Dauerzählstelle, die beide Richtungen zusammen zählt oder keine nennt; nur angezeigt
+const LAGE_TEXT = { passt: "passt", pruefen: "prüfen", geprueft: "geprüft", ohne: "ohne Link", aus: "ausgelassen", quer: "nicht richtungsfein" };
+const LAGE_FARBE = { passt: "--st-passt", pruefen: "--st-pruefen", geprueft: "--st-geprueft", ohne: "--st-ohne", aus: "--st-aus", quer: "--st-quer" };
 const GRUPPE_FARBE = { kfz: "#1f4ea3", lkw: "#c0522b", sv: "#8f4fb3", rad: "#2e7d32", fuss: "#6b7785" };
 const WEIT_M = 20; // ab hier ist eine Zuordnung zu prüfen
 const WINKEL_PRUEFEN = 35; // Grad
@@ -87,6 +88,8 @@ const state = {
   },
 };
 const KURZ_LISTE_MAX = 400; // so viele Stellen zeigt die Liste höchstens, die gewählte immer
+// Familien: dauer (gerichtete Dauerzählstellen), kurz (Kurzzeit-Punkte), quer (Dauerzählstellen
+// ohne Richtung: auf Karte und Liste, aber ohne Linksuche, Zuordnung und Ausgabe)
 const familieVon = (s) => s?.familie ?? "dauer";
 // Kurzzeit-IDs tragen Zählung und Arm hinter „/“; die der Dauerzählstellen nie
 const familieVonId = (id) => (String(id).includes("/") ? "kurz" : "dauer");
@@ -1359,9 +1362,15 @@ async function waehleStellen() {
       ohneLizenz.add(q?.name ?? x.quelle);
       continue;
     }
-    if (x.r.art !== "gerichtet") { gruende.beide++; continue; }
-    if (x.r.grad == null && !ohneKompass) { gruende.kompass++; continue; }
     const gruppen = x.gruppen.filter((g) => state.gruppen[g]?.an);
+    if (x.r.art !== "gerichtet") {
+      // beide Richtungen zusammen oder keine genannt: passt auf keinen einzelnen Link, nur anzeigen
+      if (!gruppen.length) { gruende.gruppe++; continue; }
+      gruende.beide++;
+      gewaehlt.push({ ...x, familie: "quer", aktiv: gruppen, modi: [] });
+      continue;
+    }
+    if (x.r.grad == null && !ohneKompass) { gruende.kompass++; continue; }
     if (!gruppen.length) { gruende.gruppe++; continue; }
     const modi = [...new Set(gruppen.flatMap((g) => state.gruppen[g].link.split(/[,\s]+/).map((m) => m.trim().toLowerCase()).filter(Boolean)))];
     gewaehlt.push({ ...x, familie: "dauer", aktiv: gruppen, modi });
@@ -1374,7 +1383,7 @@ async function waehleStellen() {
   gewaehlt.sort((a, b) => ordnung.compare(a.id, b.id));
   kurze.sort((a, b) => ordnung.compare(a.id, b.id));
   gewaehlt.push(...kurze);
-  state.bereich = { imGebiet: imGebiet.length, gruende, ohneLizenz: [...ohneLizenz], dauer: gewaehlt.length - kurze.length };
+  state.bereich = { imGebiet: imGebiet.length, gruende, ohneLizenz: [...ohneLizenz], dauer: gewaehlt.filter((x) => familieVon(x) === "dauer").length };
   renderKurz();
   state.stellen = gewaehlt;
   state.byId = new Map(gewaehlt.map((x) => [x.id, x]));
@@ -1401,7 +1410,7 @@ const umkreisVon = (s) => {
 
 async function suche() {
   const t = ++state.suchToken;
-  const stellen = state.stellen.map((s) => ({ id: s.id, ...suchpunkt(s), name: s.suchName ?? s.name, modi: s.modi, radius: umkreisVon(s), rueckfall: s.rueckfall }));
+  const stellen = state.stellen.filter((s) => familieVon(s) !== "quer").map((s) => ({ id: s.id, ...suchpunkt(s), name: s.suchName ?? s.name, modi: s.modi, radius: umkreisVon(s), rueckfall: s.rueckfall }));
   if (!stellen.length) {
     state.ergebnisse.clear();
     nachSuche();
@@ -1426,10 +1435,13 @@ function nachSuche() {
   for (const id of ["s-stellen", "s-pruefen", "s-mitteln", "s-ausgeben"]) $(id).classList.toggle("inactive", !state.stellen.length);
   $("legend").hidden = !state.stellen.length;
   $("legend-kurz").hidden = !state.stellen.some((s) => familieVon(s) === "kurz");
+  $("legend-quer").hidden = !state.stellen.some((s) => familieVon(s) === "quer");
   const mit = state.stellen.filter((s) => linkVon(s)).length;
   const kurze = state.stellen.filter((s) => familieVon(s) === "kurz").length;
-  const wer = kurze ? `${de(state.stellen.length - kurze)} Dauerzählstellen und ${de(kurze)} Kurzzeit-Punkte` : `${de(state.stellen.length)} Zählstellen`;
-  setStatus(`${wer}, ${de(mit)} davon mit Link. ${zaehle("pruefen") ? `${de(zaehle("pruefen"))} zum Prüfen.` : ""}`.trim(), "done");
+  const quer = state.stellen.filter((s) => familieVon(s) === "quer").length;
+  const dauer = state.stellen.length - kurze - quer;
+  const wer = kurze ? `${de(dauer)} Dauerzählstellen und ${de(kurze)} Kurzzeit-Punkte` : `${de(dauer)} Zählstellen`;
+  setStatus(`${wer}, ${de(mit)} davon mit Link. ${zaehle("pruefen") ? `${de(zaehle("pruefen"))} zum Prüfen.` : ""}${quer ? ` ${de(quer)} ohne Richtung nur angezeigt.` : ""}`.trim(), "done");
   renderAuswahl();
   renderMittelRahmen();
   mittleAlle();
@@ -1509,6 +1521,7 @@ function ausgabeModi(s) {
 
 /** Der Link einer Stelle: von Hand, sonst automatisch. */
 function linkVon(s) {
+  if (familieVon(s) === "quer") return null; // nur angezeigt, nie an einem Link
   const e = state.entscheid.get(s.id);
   if (e?.aus) return null;
   return e?.link ?? state.wahl.get(s.id) ?? null;
@@ -1555,6 +1568,7 @@ function gruendeVon(s) {
 // Kurzzeit-Punkten fragen Liste, Filter und Karte sonst bei jedem Zeichnen alle Gründe neu ab.
 const lageCache = new Map();
 function lageVon(s) {
+  if (familieVon(s) === "quer") return "quer";
   const e = state.entscheid.get(s.id);
   if (e?.aus) return "aus";
   if (e?.link) return "geprueft";
@@ -1600,7 +1614,7 @@ function speichere() {
 async function loeseEntscheide() {
   for (const s of state.stellen) {
     const roh = gespeichert[s.id];
-    if (!roh || state.entscheid.has(s.id)) continue;
+    if (!roh || state.entscheid.has(s.id) || familieVon(s) === "quer") continue;
     const e = { link: null, aus: Boolean(roh.aus), kommentar: roh.kommentar ?? "", anker: roh.anker ?? null, uebernommen: roh.uebernommen ?? null };
     if (roh.link) {
       const r = await frage({ type: "link", id: roh.link, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } }).catch(() => null);
@@ -1744,7 +1758,7 @@ function waehle(id, { fliegen = true } = {}) {
   state.auswahl = id;
   const s = state.byId.get(id);
   if (s && fliegen) map.flyTo({ center: [s.lon, s.lat], zoom: Math.max(map.getZoom(), 16.5), duration: 600 });
-  if (s && familieVon(s) === "dauer" && !state.stunden.has(id)) ladeStunden([s]).then(() => state.auswahl === id && renderKarte());
+  if (s && familieVon(s) !== "kurz" && !state.stunden.has(id)) ladeStunden([s]).then(() => state.auswahl === id && renderKarte());
   renderListe();
   renderKarte();
   zeichneDaten();
@@ -1763,7 +1777,8 @@ $("naechste").addEventListener("click", naechste);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") return pickEnde();
   if (e.target.closest("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
-  const id = state.auswahl;
+  const quer = familieVon(state.byId.get(state.auswahl)) === "quer";
+  const id = quer ? null : state.auswahl;
   if (e.key === "n") naechste();
   else if (e.key === "p" && id) passt(id);
   else if (e.key === "w" && id) (state.pick ? pickEnde() : pickStart());
@@ -1771,7 +1786,7 @@ document.addEventListener("keydown", (e) => {
   else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && document.activeElement?.closest("#liste")) {
     e.preventDefault();
     const ids = sichtbare().map((s) => s.id);
-    const at = ids.indexOf(id);
+    const at = ids.indexOf(state.auswahl);
     const next = ids[Math.max(0, Math.min(ids.length - 1, at + (e.key === "ArrowDown" ? 1 : -1)))];
     if (next) {
       waehle(next);
@@ -1807,11 +1822,11 @@ function renderAuswahl() {
   t.hidden = !b;
   if (!b) return;
   const teile = [];
-  if (b.gruende.beide) teile.push(`${de(b.gruende.beide)} zählen beide Richtungen zusammen oder nennen keine (die meisten Rad-Zählstellen) und passen auf keinen einzelnen Link`);
   if (b.gruende.lizenz) teile.push(`${de(b.gruende.lizenz)} stammen aus Quellen ohne Lizenz (${b.ohneLizenz.map(esc).join(", ")})`);
   if (b.gruende.kompass) teile.push(`${de(b.gruende.kompass)} nennen nur ein Ziel`);
   if (b.gruende.gruppe) teile.push(`${de(b.gruende.gruppe)} zählen keine der gewählten Gruppen`);
-  t.innerHTML = teile.length ? `Draußen bleiben: ${teile.join("; ")}.` : "Alle Stellen im Gebiet sind dabei.";
+  const quer = b.gruende.beide ? ` Nur angezeigt: ${de(b.gruende.beide)} zählen beide Richtungen zusammen oder nennen keine (die meisten Rad-Zählstellen). Sie passen auf keinen einzelnen Link; auf der Karte sind sie violett und werden nicht zugeordnet.` : "";
+  t.innerHTML = `${teile.length ? `Draußen bleiben: ${teile.join("; ")}.` : "Alle gerichteten Stellen im Gebiet sind dabei."}${quer}`;
   renderGruppen();
 }
 
@@ -1856,13 +1871,15 @@ const FILTER = [
   ["passt", "Passt"],
   ["geprueft", "Geprüft"],
   ["aus", "Ausgelassen"],
+  ["quer", "Beide Richtungen"],
 ];
 const FAMILIEN = [
   ["alle", "Alle"],
   ["dauer", "Dauer"],
   ["kurz", "Kurzzeit"],
 ];
-const familiePasst = (s) => state.familie === "alle" || familieVon(s) === state.familie;
+// in der Liste gehören die Stellen ohne Richtung zu den Dauerzählstellen
+const familiePasst = (s) => state.familie === "alle" || (familieVon(s) === "kurz" ? "kurz" : "dauer") === state.familie;
 function renderFilter() {
   const kurze = state.stellen.filter((s) => familieVon(s) === "kurz").length;
   const fam = $("familie");
@@ -1889,6 +1906,7 @@ function renderFilter() {
     b.value = wert;
     b.innerHTML = `${text}<span>${de(n)}</span>`;
     b.disabled = !n && wert !== "alle";
+    b.hidden = wert === "quer" && !n;
     return b;
   }));
 }
@@ -1910,7 +1928,11 @@ $("familie").addEventListener("click", (e) => {
 const sichtbare = () => state.stellen.filter((s) => familiePasst(s) && (state.filter === "alle" || lageVon(s) === state.filter));
 
 /** Die zweite Zeile eines Eintrags: Richtung und Kennung, bei Kurzzeit-Punkten dazu der Tag der Zählung. */
-const listenText = (s) => (familieVon(s) === "kurz" ? `${s.richtungText} · ${datumText(s.kurz.datum)} · ${s.kurz.stelle}` : `${richtungsText(s)} · ${s.id}`);
+const listenText = (s) => {
+  if (familieVon(s) === "kurz") return `${s.richtungText} · ${datumText(s.kurz.datum)} · ${s.kurz.stelle}`;
+  if (familieVon(s) === "quer") return `${richtungsText(s) || "ohne Fahrtrichtung"}, nur angezeigt · ${s.id}`;
+  return `${richtungsText(s)} · ${s.id}`;
+};
 
 function renderListe() {
   const ul = $("liste");
@@ -1979,7 +2001,9 @@ function profilSvg(s) {
     });
   });
   const ticks = [0, 6, 12, 18, 23].map((h) => `<text x="${(h * breit + breit / 2).toFixed(1)}" y="${H - 2}" text-anchor="middle">${h}</text>`).join("");
-  const leg = gruppen.map((g) => `<span><i style="--c:${GRUPPE_FARBE[g]}"></i>${esc(state.daten.gruppenNamen[g] ?? g)} → ${esc(state.gruppen[g].mode)}: ${de(r[g].tageGenutzt)} Tage${r[g].vollstaendig ? "" : ", nicht alle Stunden"}</span>`).join("");
+  // eine Stelle ohne Richtung geht in keine Ausgabe: dort kein networkMode in der Legende
+  const modus = (g) => (familieVon(s) === "quer" ? "" : ` → ${esc(state.gruppen[g].mode)}`);
+  const leg = gruppen.map((g) => `<span><i style="--c:${GRUPPE_FARBE[g]}"></i>${esc(state.daten.gruppenNamen[g] ?? g)}${modus(g)}: ${de(r[g].tageGenutzt)} Tage${r[g].vollstaendig ? "" : ", nicht alle Stunden"}</span>`).join("");
   return `<svg class="profil" viewBox="0 0 ${W} ${H}" role="img" aria-label="Tagesgang der Stelle"><text x="0" y="9">${de(max)} Fz/h</text>${bars}${ticks}</svg><div class="legende-profil">${leg}</div>`;
 }
 
@@ -2032,11 +2056,27 @@ function kopfKurz(s) {
     ${p.andere.length ? `<p class="note">Am selben Tag gibt es hier ${p.andere.length === 1 ? "eine weitere Zählung" : "weitere Zählungen"} (${esc(p.andere.join(", "))}), etwa zu anderen Stunden oder auf dem anderen Gehweg; sie ${p.andere.length === 1 ? "bleibt" : "bleiben"} draußen.</p>` : ""}`;
 }
 
+/** Steckbrief einer Stelle ohne Richtung: was sie zählt und warum sie an keinen Link geht, dazu ihr Tagesgang. */
+function karteQuer(box, s) {
+  const q = state.daten.quellen.get(s.quelle);
+  const warum = s.r.art === "beide"
+    ? "Die Stelle zählt beide Fahrtrichtungen zusammen."
+    : "Die Quelle nennt keine Fahrtrichtung. Meist zählt eine solche Stelle beide Richtungen zusammen, etwa an einem Radweg, der in beiden Richtungen befahren wird.";
+  box.innerHTML = `
+    <div><h3>${esc(s.name || s.id)}</h3>${s.abschnitt ? `<p class="sub">${esc(s.abschnitt)}</p>` : ""}</div>
+    <div class="meta">${kompassSvg(null)}<span>${esc(richtungsText(s) || "ohne Fahrtrichtung")}</span></div>
+    <div class="meta"><span>${esc(s.id)}</span>·<span>${esc(q.name)}</span>·<span>${q.lizenzen.map(lizenzLink).join(", ")}</span>·<span>${s.gruppen.map((g) => esc(state.daten.gruppenNamen[g] ?? g)).join(", ")}</span></div>
+    <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE.quer})">nicht richtungsfein · nur angezeigt</span></div>
+    <p class="note">${esc(warum)} Eine MATSim-Messstelle hängt an einem gerichteten Link, darum geht die Stelle an keinen Link und nicht in die Ausgabe. Der Tagesgang unten ist die Summe beider Richtungen.</p>
+    <div>${state.stunden.has(s.id) ? profilSvg(s) : '<p class="note">Stundenwerte werden geladen …</p>'}</div>`;
+}
+
 function renderKarte() {
   const box = $("karte");
   const s = state.byId.get(state.auswahl);
   box.hidden = !s;
   if (!s) return;
+  if (familieVon(s) === "quer") return karteQuer(box, s);
   const kurzPunkt = familieVon(s) === "kurz";
   const q = kurzPunkt ? null : state.daten.quellen.get(s.quelle);
   const lage = lageVon(s);
@@ -2241,12 +2281,13 @@ function mittleAlle() {
   let unvollstaendig = 0;
   let ohneWerte = 0;
   for (const s of state.stellen) {
-    if (familieVon(s) !== "dauer") continue; // Kurzzeitzählungen: ein Tag, kein Mittel
+    if (familieVon(s) === "kurz") continue; // Kurzzeitzählungen: ein Tag, kein Mittel
     const st = state.stunden.get(s.id);
     if (st === undefined) continue;
     const r = {};
     for (const g of s.aktiv) r[g] = mittle(state.daten, s, st, g, state.mittel);
     state.ergebnisMittel.set(s.id, r);
+    if (familieVon(s) === "quer") continue; // nur für den Steckbrief
     const gr = Object.values(r);
     if (gr.some((x) => x.werte.some((v) => v != null))) {
       mitWerten++;
@@ -2620,7 +2661,7 @@ function ankerVon(s) {
 const netzName = () => (state.netz?.beispiel ? BEISPIEL.name : state.netz?.name ?? "");
 
 $("zuordnung-csv").addEventListener("click", () => {
-  const zeilen = state.stellen.map((s) => {
+  const zeilen = state.stellen.filter((s) => familieVon(s) !== "quer").map((s) => {
     const link = linkVon(s);
     const e = state.entscheid.get(s.id);
     const lage = lageVon(s);
