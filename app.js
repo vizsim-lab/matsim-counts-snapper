@@ -12,6 +12,7 @@ import { VORGABE as MITTEL_VORGABE, WOCHENTAGE, mittle, aggregatText, auswahlTex
 import { countsXml, zuordnungCsv, leseZuordnungCsv } from "./lib/counts.js";
 import { OSM_FILTER } from "./lib/osm.js";
 import { baueKonfiguration, leseKonfiguration, entscheidung as konfigEntscheidung } from "./lib/konfig.js";
+import { crsVorschlag } from "./lib/crsvorschlag.js";
 import { baueGebiet, imGebiet as punktImGebiet, gebietGeojson, leseGeojson, lesePoly, leseShp, leseZip, crsAusPrj, siehtNachGradAus, umrechnen, ueberschneidet, VEREINFACHT_M } from "./lib/gebiet.js";
 import { STROEME_VERTRAG, KURZ_GRUPPEN, KURZ_VORGABE, TAGTYP, leseManifest, leseStellen, stroemePfad, waehleZaehlungen, punkte as kurzPunkte, lizenzenVon } from "./lib/kurzzeit.js";
 
@@ -390,10 +391,17 @@ let basemapChoice = store.get("snapper.basemap");
 if (!["positron", "dark", "none"].includes(basemapChoice)) basemapChoice = null;
 const autoBasemap = () => (darkScheme.matches ? "dark" : "positron");
 let basemapToken = 0;
+let basisQuellen = new Set(); // die Quellen der Hintergrundkarte; die eigenen kommen erst danach dazu
 function markBasemap(name) {
   basemap = name;
   mapwrap.dataset.basemap = name;
   for (const b of $("basemap").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === name));
+}
+function basemapNichtDa() {
+  const e = $("basemap-error");
+  e.textContent = "nicht erreichbar";
+  e.title = "OpenFreeMap antwortet nicht. Netz, Zählstellen und Ausgaben gehen trotzdem; ein Klick auf Positron oder Dark versucht es noch einmal.";
+  e.hidden = false;
 }
 async function setBasemap(name) {
   const t = ++basemapToken;
@@ -405,14 +413,26 @@ async function setBasemap(name) {
   } catch {
     if (t !== basemapToken) return;
     markBasemap("none");
-    $("basemap-error").textContent = "nicht erreichbar";
-    $("basemap-error").hidden = false;
+    basemapNichtDa();
     style = plainStyle();
   }
   if (t !== basemapToken) return;
   styleReady = false;
+  basisQuellen = new Set(Object.keys(style.sources ?? {}));
   map.setStyle(style, { diff: false });
 }
+// Was die Karte nicht laden kann. Kommt die Hintergrundkarte nicht (ihr TileJSON oder ihre Kacheln,
+// etwa weil tiles.openfreemap.org nicht antwortet), steht das an ihren Knöpfen; alles andere und
+// die Einzelheiten bleiben in der Konsole, wie ohne diesen Empfänger.
+map.on("error", (e) => {
+  if (e.sourceId && basisQuellen.has(e.sourceId)) {
+    // eine fehlende Kachel (404) ist kein Ausfall, eine ohne Antwort (Status 0) schon
+    if (!e.tile || !e.error?.status) basemapNichtDa();
+    console.warn("Hintergrundkarte:", e.error?.message ?? e.error);
+    return;
+  }
+  console.error(e.error ?? e);
+});
 $("basemap").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
@@ -606,7 +626,7 @@ function netzWeg() {
   netzZeichnen(false);
 }
 
-async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = null, geoUrl = null, beispiel = false, crs = null, datei = null, geoDatei = null }) {
+async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = null, geoUrl = null, beispiel = false, datei = null, geoDatei = null }) {
   const nr = ++state.ladeNr;
   pickEnde();
   popup?.remove();
@@ -620,7 +640,6 @@ async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = nu
   state.auswahl = null;
   renderAlles();
   renderAuswahl();
-  if (crs) $("crs").value = crs;
   renderQuelle({ name, url, geoName, beispiel, laeuft: true });
   setStatus(`${name} lesen …`);
   const kopie = { name, geoName, url, geoUrl, beispiel, datei, geoDatei };
@@ -628,9 +647,13 @@ async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = nu
   try {
     const transfer = [bytes.buffer];
     if (geoBytes) transfer.push(geoBytes.buffer);
-    const r = await frage({ type: "netz", name, bytes, geoBytes, crs: $("crs").value.trim(), osmFilter: $("osm-filter").value }, transfer);
+    // Das Beispiel nennt kein CRS, hat aber ein bekanntes: Es gilt nur für das Beispiel, das Feld
+    // bleibt für das nächste Netz, wie es ist (sonst läse ein Netz mit „Atlantis“ in Gauß-Krüger).
+    const crs = beispiel ? BEISPIEL.crs : $("crs").value.trim();
+    const r = await frage({ type: "netz", name, bytes, geoBytes, crs, osmFilter: $("osm-filter").value }, transfer);
     if (nr !== state.ladeNr) return;
     const info = r.info;
+    if (beispiel) info.crsBeispiel = true;
     netzWeg();
     netzUrl = URL.createObjectURL(new Blob([r.geojson], { type: "application/geo+json" }));
     state.netz = { name, url, geoName, geoUrl, beispiel, datei, geoDatei, info, key: url ? `url:${url}` : beispiel ? "beispiel:berlin" : `datei:${name}:${info.links}${info.osm ? `:${info.osm.filterCode}` : ""}` };
@@ -649,7 +672,7 @@ async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = nu
   }
 }
 
-async function ladeNetzVonUrl({ net, geo = "auto", beispiel = false, crs = null }) {
+async function ladeNetzVonUrl({ net, geo = "auto", beispiel = false }) {
   laden?.abort();
   const ctrl = (laden = new AbortController());
   const name = beispiel ? BEISPIEL.name : fileName(net);
@@ -668,7 +691,7 @@ async function ladeNetzVonUrl({ net, geo = "auto", beispiel = false, crs = null 
     const geoBytes = geoUrl ? await fetchBytes(geoUrl, fileName(geoUrl), ctrl.signal) : null;
     if (ctrl.signal.aborted) return;
     laden = null;
-    await nimmNetz({ name, bytes, url: beispiel ? null : net, geoName: geoUrl ? fileName(geoUrl) : null, geoBytes, geoUrl, beispiel, crs });
+    await nimmNetz({ name, bytes, url: beispiel ? null : net, geoName: geoUrl ? fileName(geoUrl) : null, geoBytes, geoUrl, beispiel });
   } catch (err) {
     if (ctrl.signal.aborted) return;
     laden = null;
@@ -714,7 +737,7 @@ async function nimmGeometrie(file) {
   if (!n) return;
   try {
     const bytes = await netzBytes(n);
-    await nimmNetz({ ...n, bytes, geoName: file.name, geoBytes: new Uint8Array(await file.arrayBuffer()), geoDatei: file, geoUrl: null, crs: null });
+    await nimmNetz({ ...n, bytes, geoName: file.name, geoBytes: new Uint8Array(await file.arrayBuffer()), geoDatei: file, geoUrl: null });
   } catch (err) {
     setStatus(`${n.name} ließ sich nicht neu lesen (${reason(err)}).`, "error");
   }
@@ -729,7 +752,7 @@ async function nochmal() {
   try {
     const bytes = await netzBytes(n);
     const geoBytes = n.geoDatei ? new Uint8Array(await n.geoDatei.arrayBuffer()) : null;
-    await nimmNetz({ ...n, bytes, geoBytes, crs: null });
+    await nimmNetz({ ...n, bytes, geoBytes });
   } catch (err) {
     setStatus(`${n.name} ließ sich nicht neu lesen (${reason(err)}).`, "error");
   }
@@ -748,7 +771,7 @@ $("geo-clear").addEventListener("click", async () => {
   const n = state.netz;
   if (!n) return;
   if (n.url) return ladeNetzVonUrl({ net: n.url, geo: "0" });
-  await nimmNetz({ ...n, bytes: await netzBytes(n), geoName: null, geoBytes: null, geoDatei: null, crs: null });
+  await nimmNetz({ ...n, bytes: await netzBytes(n), geoName: null, geoBytes: null, geoDatei: null });
 });
 const drop = $("drop");
 drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
@@ -758,7 +781,7 @@ drop.addEventListener("drop", (e) => {
   drop.classList.remove("over");
   nimmDateien(e.dataTransfer.files);
 });
-$("beispiel").addEventListener("click", () => ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true, crs: BEISPIEL.crs }));
+$("beispiel").addEventListener("click", () => ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true }));
 {
   const sel = $("osm-filter");
   sel.replaceChildren(...Object.entries(OSM_FILTER).map(([code, f]) => {
@@ -778,9 +801,42 @@ $("beispiel").addEventListener("click", () => ladeNetzVonUrl({ net: BEISPIEL.url
     if (state.netz?.info?.osm) nochmal();
   });
 }
+/** Das CRS steht fest: aus dem Netz selbst oder das des Beispiels. Sonst gilt das Feld. */
+function crsFest(info) {
+  return Boolean(info?.crsAusDatei || info?.crsBeispiel);
+}
 $("crs").addEventListener("change", () => {
   // ein anderes CRS wirkt nur auf ein Netz ohne eigenes
-  if (state.netz?.info?.crsAusDatei) return;
+  if (crsFest(state.netz?.info)) return;
+  nochmal();
+});
+
+/** Die Stellen in einem Kasten [West, Süd, Ost, Nord] in WGS84, mit Rand: so weit reicht das Gebiet des Netzes. */
+function imKasten(stellen, [w, s, o, n], rand = 0.002) {
+  return stellen.filter((x) => x.lon >= w - rand && x.lon <= o + rand && x.lat >= s - rand && x.lat <= n + rand);
+}
+
+/**
+ * Ein Netz ohne eigenes CRS: Liegt mit dem aus dem Feld keine Dauerzählstelle in seinem Gebiet, mit
+ * einem der üblichen aber schon, steht das unter dem Feld, mit einem Knopf zum Übernehmen. Ohne die
+ * Daten der Zählkarte nur, wenn das Netz nicht in Deutschland liegt.
+ */
+function renderCrsVorschlag() {
+  const feld = $("crs-vorschlag");
+  const info = state.netz?.info;
+  const probe = info?.crsProbe;
+  const d = state.daten;
+  const zahl = (bbox) => (!d ? null : bbox ? imKasten(d.stellen, bbox).length : 0);
+  const v = probe && !crsFest(info) ? crsVorschlag({ code: info.crs, imLand: probe.imLand, stellen: zahl(info.bbox) }, probe.andere.map((k) => ({ code: k.code, stellen: zahl(k.bbox) }))) : null;
+  feld.hidden = !v;
+  if (!v) return;
+  const knoepfe = v.besser.map((k) => ` <button type="button" class="linkbtn" data-crs="${esc(k.code)}">${esc(k.code)} nehmen</button>`).join("");
+  feld.querySelector("small").innerHTML = `${esc(v.text)}${knoepfe}`;
+}
+$("crs-vorschlag").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-crs]");
+  if (!b) return;
+  $("crs").value = b.dataset.crs;
   nochmal();
 });
 
@@ -794,7 +850,11 @@ function chip(text, extra = "") {
 function renderQuelle(n) {
   const platzhalter = n?.info?.crsPlatzhalter;
   $("crs-platzhalter").hidden = !platzhalter;
-  if (platzhalter) $("crs-platzhalter").querySelector("small").textContent = `Das Netz nennt „${platzhalter}“ als Koordinatensystem. So schreibt MATSim es, wenn in der Config global.coordinateSystem fehlt; die Koordinaten können trotzdem stimmen. Gelesen mit ${n.info.crs} von hier; liegt das Netz auf der Karte am falschen Ort, hier das richtige eintragen.`;
+  if (platzhalter) {
+    const wie = n.info.crs === $("crs").defaultValue ? ", der Vorgabe hier" : " aus dem Feld";
+    $("crs-platzhalter").querySelector("small").textContent = `Das Netz nennt „${platzhalter}“ als Koordinatensystem: So schreibt MATSim es, wenn in der Config global.coordinateSystem fehlt. Gelesen mit ${n.info.crs}${wie}; liegt das Netz auf der Karte am falschen Ort, hier das richtige eintragen.`;
+  }
+  renderCrsVorschlag();
   // nur die Felder, die für das Netz gelten: der OSM-Filter beim OSM-Auszug, das CRS beim MATSim-Netz
   const osmNetz = n ? Boolean(n.info?.osm) || (!n.info && istOsmName(n.name)) : null;
   $("osm-feld").hidden = osmNetz === false;
@@ -822,8 +882,9 @@ function renderQuelle(n) {
     box.append(chip(osm.filter));
   } else if (n.info) {
     box.append(chip(`${de(n.info.links)} Links`));
-    const crs = chip(n.info.crs + (n.info.crsAusDatei ? "" : " aus Formular"), n.info.crsAusDatei ? "fit" : "");
+    const crs = chip(n.info.crs + (crsFest(n.info) ? "" : " aus Formular"), crsFest(n.info) ? "fit" : "");
     if (n.info.crsPlatzhalter) crs.title = `Das Netz nennt „${n.info.crsPlatzhalter}“: MATSims Vorgabe, wenn beim Schreiben kein Koordinatensystem gesetzt war.`;
+    else if (n.info.crsBeispiel) crs.title = `Das Beispielnetz nennt kein Koordinatensystem; es liegt in ${n.info.crsName}. Das Feld gilt für das nächste Netz.`;
     box.append(crs);
     const w = n.info.wege;
     if (w?.links) {
@@ -1413,6 +1474,8 @@ let waehlToken = 0;
 async function waehleStellen() {
   const d = state.daten;
   const n = state.netz;
+  // die Zählstellen sind jetzt da oder neu: Sie entscheiden, ob ein anderes CRS besser passt
+  renderCrsVorschlag();
   if (!d || !n?.info?.bbox) {
     if (n && !d) {
       if (state.datenFehler) setStatus("Netz geladen, aber ohne die Daten der Zählkarte gibt es nichts zuzuordnen (siehe Schritt 2).", "error");
@@ -1420,9 +1483,7 @@ async function waehleStellen() {
     } else if (n && !n.info?.bbox) setStatus("Das Netz hat keine Links, die sich zeichnen lassen.", "error");
     return;
   }
-  const [w, s, o, nn] = n.info.bbox;
-  const rand = 0.002;
-  const imNetz = d.stellen.filter((x) => x.lon >= w - rand && x.lon <= o + rand && x.lat >= s - rand && x.lat <= nn + rand);
+  const imNetz = imKasten(d.stellen, n.info.bbox);
   const imGebiet = imNetz.filter((x) => inGebiet(`d:${x.id}`, x.lon, x.lat));
   const ohneKompass = $("ohne-kompass").checked;
   const gruende = { beide: 0, lizenz: 0, gruppe: 0, kompass: 0 };
@@ -3436,7 +3497,8 @@ async function nimmKonfiguration(file, netzDabei = false) {
   const kn = k.netz;
   // Das CRS gehört zum Netz: Es gilt nur für das Netz der Konfiguration und nur, wenn es dort aus
   // dem Formular kam. Den OSM-Filter hat nur eine Sitzung mit OSM-Auszug benutzt.
-  const crs = kn?.art !== "osm" && !kn?.crs_aus_datei && (!n || netzDabei || gleichesNetz(kn, netzJetzt()));
+  // Das Beispiel hat sein eigenes, und ältere Konfigurationen mit dem Beispiel tragen es noch im Formular.
+  const crs = kn?.art !== "osm" && !kn?.crs_aus_datei && !kn?.beispiel && (!n || netzDabei || gleichesNetz(kn, netzJetzt()));
   const osm = !kn || kn.art === "osm";
   const vorher = { crs: $("crs").value.trim(), osm: $("osm-filter").value };
   wendeEinstellungenAn(k.einstellungen, { crs, osm });
@@ -3444,11 +3506,11 @@ async function nimmKonfiguration(file, netzDabei = false) {
   if (netzDabei) return true;
   if (n) {
     // ein anderes CRS oder ein anderer OSM-Filter wirkt erst, wenn das Netz neu gelesen ist
-    const neuLesen = n.info?.osm ? $("osm-filter").value !== vorher.osm : !n.info?.crsAusDatei && $("crs").value.trim() !== vorher.crs;
+    const neuLesen = n.info?.osm ? $("osm-filter").value !== vorher.osm : !crsFest(n.info) && $("crs").value.trim() !== vorher.crs;
     if (neuLesen) await nochmal();
     else await waehleStellen();
   } else if (k.netz?.beispiel) {
-    await ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true, crs: BEISPIEL.crs });
+    await ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true });
   } else if (k.netz?.url) {
     setStatus(`${file.name}: Einstellungen übernommen, ${k.netz.name ?? "das Netz"} wird geladen …`, "busy");
     await ladeNetzVonUrl({ net: k.netz.url, geo: k.netz.geometrien_url ?? (k.netz.geometrien ? "auto" : "0") });
@@ -3503,7 +3565,7 @@ if (netParam) {
   if (url) ladeNetzVonUrl({ net: url, geo: params.get("geo") ?? "auto" });
   else setStatus("Der Parameter net ist keine gültige Adresse.", "error");
 } else {
-  ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true, crs: BEISPIEL.crs });
+  ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true });
 }
 
 // für Tests im Browser: ?debug gibt Karte und Zustand frei

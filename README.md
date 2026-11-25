@@ -19,9 +19,14 @@ Detektoren der Verkehrsinformationszentrale.
    schreibt, auch gepackt) oder dem Attribut `origgeom`. Zur [Kompression](#gepackte-dateien)
    unten mehr. Gelesen wird wie in [kachelwerk](https://github.com/vizsim-lab/kachelwerk);
    Links ohne `modes` gelten wie in MATSim als `car`, pt-Links bleiben aus der Karte. Das CRS kommt
-   aus dem Netz-Attribut `coordinateReferenceSystem`, sonst aus dem Formular. „Atlantis“ zählt als
-   keins: So schreibt MATSim das Attribut, wenn in der Config `global.coordinateSystem` fehlt; die
-   Koordinaten stimmen oft trotzdem, und die Seite nimmt das CRS aus dem Formular, mit Hinweis. Oder ein OSM-Auszug
+   aus dem Netz-Attribut `coordinateReferenceSystem`, sonst aus dem Formular (Vorgabe EPSG:25832).
+   „Atlantis“ zählt als keins: So schreibt MATSim das Attribut, wenn in der Config
+   `global.coordinateSystem` fehlt; die Koordinaten stimmen oft trotzdem, und die Seite nimmt das
+   CRS aus dem Formular, mit Hinweis. Liegt bei einem Netz ohne CRS mit dem aus dem Formular keine
+   Dauerzählstelle in seinem Gebiet, mit einem der üblichen (UTM 32N und 33N, WGS 84, Gauß-Krüger,
+   Soldner Berlin, …) aber schon, schlägt die Seite dieses vor, mit einem Knopf zum Übernehmen. Das
+   Beispielnetz liest sie mit seinem eigenen CRS (Gauß-Krüger 4); das Formular bleibt dabei, wie es
+   ist. Oder ein OSM-Auszug
    (`.osm.pbf`), siehe [unten](#osm-auszug-und-übernahme-auf-ein-anderes-netz). Das Formular zeigt
    nur, was für das geladene Netz gilt: das CRS bei einem MATSim-Netz, die Auswahl der Wege bei
    einem OSM-Auszug. Hierher lässt sich auch eine [Konfiguration](#konfiguration) ziehen, gern
@@ -395,6 +400,8 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
 (`vizsim-lab.github.io`; die Kurzzeitzählungen nur, wenn sie an sind: `manifest.json`,
 `index.json`, je Jahr eine Datei der Ströme), das Beispielnetz (`raw.githubusercontent.com`), Netze aus dem VSP-SVN
 (`svn.vsp.tu-berlin.de`) und die Hintergrundkarte (`tiles.openfreemap.org`, außer bei „Ohne“).
+Antwortet OpenFreeMap nicht, steht „nicht erreichbar“ an den Knöpfen der Karte; alles andere geht
+ohne sie, und ein Klick auf Positron oder Dark versucht es noch einmal.
 
 ## Tests
 
@@ -411,7 +418,8 @@ mit neun Dauerzählstellen und zwei Kurzzeitzählungen, ein Gebiet. Neu bauen mi
 Nach draußen geht keine Anfrage. Sie prüfen den ganzen Ablauf: welche Stelle an welchen Link kommt,
 die Ausgaben gegen erwartete Dateien in `tests/web/erwartet/` (nach einer gewollten Änderung neu
 schreiben mit `ERWARTET_NEU=1 npm run test:web`), ein Mittel von Hand nachgerechnet, Konfiguration
-hin und zurück, das Gebiet, Kurzzeitzählungen und die Übernahme aus einem OSM-Auszug.
+hin und zurück, das Gebiet, Kurzzeitzählungen, die Übernahme aus einem OSM-Auszug, ein Netz ohne
+CRS nach dem Beispiel samt Vorschlag und eine Hintergrundkarte, die nicht lädt.
 
 Der Workflow „Prüfen und veröffentlichen“ (`.github/workflows/pruefen.yml`) führt beide bei jedem
 Push und Pull Request aus. Auf `main` veröffentlicht er danach die Seite, sobald GitHub Pages auf
@@ -426,7 +434,9 @@ veröffentlicht, geht die Seite ohne Tests online, und der Workflow sagt das als
 - `lib/netz.js`: MATSim-Netz und Link-Geometrien lesen (aus kachelwerk)
 - `lib/osm.js`: `.osm.pbf` lesen, Wege filtern und in gerichtete Kanten teilen
 - `lib/uebertrag.js`: eine Zuordnung über ihren Anker auf ein anderes Netz übertragen
-- `lib/crs.js`: Koordinatensysteme (proj4), auch MATSim-Namen wie `DHDN_GK4`
+- `lib/crs.js`: Koordinatensysteme (proj4), auch MATSim-Namen wie `DHDN_GK4`; wo ein Netz ohne CRS
+  mit den üblichen läge
+- `lib/crsvorschlag.js`: welches CRS die Seite einem Netz ohne eigenes vorschlägt
 - `lib/zuordnung.js`: Raster über die Links, Kandidaten, jeder Link nur einmal
 - `lib/richtung.js`: die Richtung aus dem Text der Zählkarte
 - `lib/zaehlkarte.js`: `dauer/index.json` und die Stundenwerte lesen, Ferienkalender

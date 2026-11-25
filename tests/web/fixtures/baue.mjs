@@ -36,14 +36,15 @@ for (let r = 0; r < REIHEN; r++) for (let c = 0; c + 1 < SPALTEN; c++) strecken.
 for (let c = 0; c < SPALTEN; c++) for (let r = 0; r + 1 < REIHEN; r++) strecken.push({ a: `k${c}${r}`, b: `k${c}${r + 1}`, name: `Querweg ${c}`, typ: "residential", weg: 200 + c, modes: "car,bike" });
 const links = strecken.flatMap((s) => [{ ...s, id: `${s.a}-${s.b}`, von: s.a, nach: s.b }, { ...s, id: `${s.b}-${s.a}`, von: s.b, nach: s.a }]);
 const attr = (name, wert) => `<attribute name="${name}" class="java.lang.String">${wert}</attribute>`;
-const netzXmlText = ({ crs = "EPSG:25833", rad = "bike" } = {}) => `<?xml version="1.0" encoding="UTF-8"?>
+// crs: null schreibt keins; lage: die Koordinaten eines Knotens im CRS des Netzes
+const netzXmlText = ({ crs = "EPSG:25833", rad = "bike", lage = (k) => [k.x, k.y] } = {}) => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v2.dtd">
-<network name="testgitter">
+<network name="testgitter">${crs ? `
 \t<attributes>
 \t\t${attr("coordinateReferenceSystem", crs)}
-\t</attributes>
+\t</attributes>` : ""}
 \t<nodes>
-${knoten.map((k) => `\t\t<node id="${k.id}" x="${k.x}" y="${k.y}"/>`).join("\n")}
+${knoten.map((k) => `\t\t<node id="${k.id}" x="${lage(k)[0]}" y="${lage(k)[1]}"/>`).join("\n")}
 \t</nodes>
 \t<links capperiod="01:00:00" effectivecellsize="7.5" effectivelanewidth="3.75">
 ${links.map((l) => `\t\t<link id="${l.id}" from="${l.von}" to="${l.nach}" length="${D}.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="${l.modes.replace("bike", rad)}">
@@ -60,6 +61,10 @@ schreibe("netz.xml.gz", gzipSync(netzXml, { level: 9 }));
 schreibe("netz.xml.zst", zstdCompressSync(netzXml));
 // so, wie MATSim schreibt, wenn global.coordinateSystem fehlt („Atlantis“), und mit bicycle statt bike
 schreibe("netz-atlantis.xml.zst", zstdCompressSync(Buffer.from(netzXmlText({ crs: "Atlantis", rad: "bicycle" }))));
+// statt des Beispiels der Seite (das Berliner Netz aus matsim-libs): Gauß-Krüger 4 ohne CRS-Angabe
+const gk4 = projektion("EPSG:31468");
+const alsGk4 = (k) => gk4.vonWgs(...utm.zuWgs(k.x, k.y)).map((v) => Math.round(v * 100) / 100);
+schreibe("beispiel.xml.gz", gzipSync(Buffer.from(netzXmlText({ crs: null, lage: alsGk4 })), { level: 9 }));
 
 // ---------- dasselbe Gitter als OSM-Auszug ----------
 const osmId = (k) => 1000 + k.c * 10 + k.r;

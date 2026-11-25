@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { richtung, kompass, kurz, winkelAbstand } from "../lib/richtung.js";
-import { crsDefinition, projektion } from "../lib/crs.js";
+import { crsDefinition, projektion, lageMit, randpunkte, KANDIDATEN } from "../lib/crs.js";
+import { crsVorschlag } from "../lib/crsvorschlag.js";
 import { leseNetz, leseLinkGeometrien } from "../lib/netz.js";
 import { LinkIndex, kandidaten, verteile, naechsterPunkt, namePasst, erlaubt } from "../lib/zuordnung.js";
 import { leseIndex, tagArt, tagNr, isoTag, wochentag, leseStunden } from "../lib/zaehlkarte.js";
@@ -54,6 +55,77 @@ test("crs: Schreibweisen und Umrechnung", () => {
   // Detektoren im Mittel 8 m neben den Links des Berliner Beispielnetzes aus matsim-libs
   const gk = projektion("EPSG:31468").vonWgs(13.4132, 52.5219);
   assert.ok(Math.abs(gk[0] - 4596024.1) < 1 && Math.abs(gk[1] - 5821914.6) < 1, `${gk}`);
+});
+
+test("crs: Lage eines Netzes ohne Angabe mit den üblichen Koordinatensystemen", () => {
+  // Südosten Berlins als Gitter von Punkten, wie ein Netz in diesem CRS es schreiben würde
+  const SOLL = [13.38, 52.4, 13.54, 52.5];
+  const netz = (crs) => {
+    const p = projektion(crs);
+    const xy = [];
+    for (let i = 0; i <= 40; i++) for (let j = 0; j <= 40; j++) xy.push(...p.vonWgs(SOLL[0] + (i / 40) * (SOLL[2] - SOLL[0]), SOLL[1] + (j / 40) * (SOLL[3] - SOLL[1])));
+    const f = Float64Array.from(xy);
+    const xs = f.filter((_, k) => k % 2 === 0);
+    const ys = f.filter((_, k) => k % 2 === 1);
+    const kasten = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    return { kasten, rand: randpunkte([f], kasten) };
+  };
+  const ecken = ([x0, y0, x1, y1]) => [[x0, y0], [x1, y0], [x0, y1], [x1, y1]];
+  const passend = (punkte) => KANDIDATEN.filter((c) => lageMit(punkte, c)?.imLand);
+  const utm32 = netz("EPSG:25832");
+  assert.ok(utm32.rand.length > 4 && utm32.rand.length <= 4 * 257, `${utm32.rand.length} Randpunkte`);
+  const lage = lageMit(utm32.rand, "EPSG:25832");
+  assert.equal(lage.imLand, true);
+  // aus den Randpunkten genau die Ausdehnung der Punkte; die Ecken der Ausdehnung in UTM lägen
+  // daneben, weil das UTM-Gitter gegen die Meridiane gedreht steht (und zählten mehr Zählstellen)
+  for (const [i, v] of lage.bbox.entries()) assert.ok(Math.abs(v - SOLL[i]) < 1e-6, `${lage.bbox}`);
+  const grob = lageMit(ecken(utm32.kasten), "EPSG:25832").bbox;
+  assert.ok(grob[0] < SOLL[0] - 0.005 && grob[2] > SOLL[2] + 0.005, `${grob}`);
+  assert.equal(lageMit(utm32.rand, projektion("EPSG:25832")).imLand, true, "auch mit einer fertigen Projektion");
+  // UTM 32N im Osten der Zone und Gauß-Krüger: nur das eine legt es nach Deutschland
+  assert.deepEqual(passend(utm32.rand), ["EPSG:25832"]);
+  const gk4 = netz("EPSG:31468");
+  assert.deepEqual(passend(gk4.rand), ["EPSG:31468"]);
+  // UTM 33N im Westen der Zone, als 32N gelesen: liegt auch in Deutschland, im Emsland bei Lingen.
+  // Das entscheiden die Zählstellen (crsvorschlag), wie bei den Testdaten der Browser-Tests.
+  assert.deepEqual(passend(netz("EPSG:25833").rand), ["EPSG:25832", "EPSG:25833"]);
+  assert.deepEqual(passend(ecken([390000, 5819000, 390900, 5819600])), ["EPSG:25832", "EPSG:25833"]);
+  // Grad: auch Soldner Berlin legt es nach Berlin, als Punkt; WGS 84 steht davor
+  assert.deepEqual(passend(netz("EPSG:4326").rand), ["EPSG:4326", "EPSG:3068"]);
+  // Gauß-Krüger als UTM: weit weg
+  assert.notEqual(lageMit(gk4.rand, "EPSG:25832")?.imLand, true);
+  assert.equal(lageMit(utm32.rand, "kein CRS"), null);
+  assert.equal(lageMit(utm32.rand, "EPSG:4326"), null, "Meter als Grad lassen sich nicht umrechnen");
+  assert.equal(lageMit([], "EPSG:25832"), null);
+  // Punkte außerhalb der Ausdehnung und kaputte zählen nicht
+  assert.deepEqual(randpunkte([Float64Array.from([0, 0, 10, 10, NaN, 5, 99, 99])], [0, 0, 10, 10], 2).length, 8);
+});
+
+test("crsvorschlag: ein anderes CRS nur, wenn mit diesem nichts im Netz liegt", () => {
+  // die Testdaten: UTM 33N, mit der Vorgabe 25832 gelesen
+  assert.deepEqual(crsVorschlag({ code: "EPSG:25832", imLand: true, stellen: 0 }, [{ code: "EPSG:25833", stellen: 9 }]), {
+    text: "Mit EPSG:25832 liegt keine Dauerzählstelle der Zählkarte im Gebiet des Netzes. Mit EPSG:25833 wären es 9.",
+    besser: [{ code: "EPSG:25833", stellen: 9 }],
+  });
+  // mit Stellen im Netz kein Vorschlag, auch wenn ein anderes mehr hätte
+  assert.equal(crsVorschlag({ code: "EPSG:25832", imLand: true, stellen: 2 }, [{ code: "EPSG:25833", stellen: 48 }]), null);
+  // Gauß-Krüger für ein Netz in UTM 32N: außerhalb, die anderen nach Zahl, ohne die leeren
+  const v = crsVorschlag({ code: "EPSG:31468", imLand: false, stellen: 0 }, [{ code: "EPSG:25832", stellen: 3 }, { code: "EPSG:4326", stellen: 0 }, { code: "EPSG:3068", stellen: 1 }, { code: "EPSG:3857", stellen: 1200 }]);
+  assert.equal(v.text, "Mit EPSG:31468 liegt das Netz nicht in Deutschland und keine Dauerzählstelle der Zählkarte in seinem Gebiet. Mit EPSG:3857 wären es 1.200, mit EPSG:25832 wären es 3.");
+  assert.deepEqual(v.besser.map((k) => k.code), ["EPSG:3857", "EPSG:25832"]);
+  assert.equal(crsVorschlag({ code: "EPSG:25832", imLand: true, stellen: 0 }, [{ code: "EPSG:25833", stellen: 1 }]).text, "Mit EPSG:25832 liegt keine Dauerzählstelle der Zählkarte im Gebiet des Netzes. Mit EPSG:25833 wäre es eine.");
+  // in Deutschland ohne Stellen, und kein anderes hat welche: nichts zu sagen
+  assert.equal(crsVorschlag({ code: "EPSG:25832", imLand: true, stellen: 0 }, [{ code: "EPSG:25833", stellen: 0 }]), null);
+  // nichts passt
+  const keins = crsVorschlag({ code: "EPSG:31468", imLand: false, stellen: 0 }, []);
+  assert.match(keins.text, /^Mit EPSG:31468 liegt das Netz nicht in Deutschland, wo die Zählkarte zählt, und keins der hier bekannten Koordinatensysteme legt es dorthin\./);
+  assert.deepEqual(keins.besser, []);
+  // ohne die Daten der Zählkarte: nur, ob es in Deutschland liegt; die üblichen zuerst
+  assert.deepEqual(crsVorschlag({ code: "EPSG:31468", imLand: false, stellen: null }, [{ code: "EPSG:25832", stellen: null }, { code: "EPSG:3857", stellen: null }, { code: "EPSG:3035", stellen: null }]), {
+    text: "Mit EPSG:31468 liegt das Netz nicht in Deutschland, wo die Zählkarte zählt; mit EPSG:25832 oder EPSG:3857 läge es dort.",
+    besser: [{ code: "EPSG:25832", stellen: null }, { code: "EPSG:3857", stellen: null }],
+  });
+  assert.equal(crsVorschlag({ code: "EPSG:25832", imLand: true, stellen: null }, [{ code: "EPSG:25833", stellen: null }]), null);
 });
 
 const NETZ = `<?xml version="1.0" encoding="UTF-8"?>

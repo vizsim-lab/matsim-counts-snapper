@@ -48,7 +48,10 @@ test("Netz mit „Atlantis“ und bicycle: CRS aus dem Formular, Rad mit einem K
   await oeffne(page, baseURL, { netz: "netz-atlantis.xml.zst", crs: "EPSG:25833" });
   await expect(page.locator("#crs-platzhalter")).toBeVisible();
   await expect(page.locator("#crs-platzhalter")).toContainText("Das Netz nennt „Atlantis“");
+  await expect(page.locator("#crs-platzhalter")).toContainText("Gelesen mit EPSG:25833 aus dem Feld");
   await expect(page.locator("#source")).toContainText("EPSG:25833 aus Formular");
+  // mit dem richtigen CRS liegen Zählstellen im Netz: kein Vorschlag
+  await expect(page.locator("#crs-vorschlag")).toBeHidden();
   const vorher = await stand(page);
   expect(vorher["test_viz:D1"]).toEqual(STELLEN["test_viz:D1"]);
   // die Links erlauben bicycle, die Rad-Gruppe sucht bike
@@ -66,6 +69,63 @@ test("Netz mit „Atlantis“ und bicycle: CRS aus dem Formular, Rad mit einem K
   // ein Netz mit eigenem CRS zeigt den Hinweis nicht
   await oeffne(page, baseURL);
   await expect(page.locator("#crs-platzhalter")).toBeHidden();
+});
+
+test("nach dem Beispiel ein Netz mit „Atlantis“: gelesen mit der Vorgabe EPSG:25832, ein passendes CRS mit einem Klick", async ({ page, baseURL }) => {
+  // das Beispiel der Seite (Berlin aus matsim-libs, Gauß-Krüger 4 ohne CRS-Angabe) aus den Testdaten
+  await page.route("https://raw.githubusercontent.com/matsim-org/matsim-libs/**/examples/scenarios/berlin/network.xml.gz", (route) =>
+    route.fulfill({ path: "tests/web/fixtures/beispiel.xml.gz", contentType: "application/gzip", headers: { "Access-Control-Allow-Origin": "*" } }),
+  );
+  await oeffne(page, baseURL, { netz: null });
+  await expect(page.locator("#source")).toContainText("Beispiel");
+  await expect(page.locator("#source .chip", { hasText: "EPSG:" })).toHaveText("EPSG:31468");
+  // das CRS des Beispiels gilt nur für das Beispiel
+  await expect(page.locator("#crs")).toHaveValue("EPSG:25832");
+  await expect(page.locator("#crs-vorschlag")).toBeHidden();
+  expect((await stand(page))["test_viz:D1"]).toEqual(STELLEN["test_viz:D1"]);
+
+  await page.setInputFiles("#file", "tests/web/fixtures/netz-atlantis.xml.zst");
+  await fertig(page);
+  await expect(page.locator("#source")).toContainText("EPSG:25832 aus Formular");
+  await expect(page.locator("#crs-platzhalter")).toContainText("Gelesen mit EPSG:25832, der Vorgabe hier");
+  // die Testdaten liegen in UTM 33N: als 32N gelesen im Emsland, ohne eine Zählstelle
+  await expect(page.locator("#crs-vorschlag")).toHaveText("Mit EPSG:25832 liegt keine Dauerzählstelle der Zählkarte im Gebiet des Netzes. Mit EPSG:25833 wären es 9. EPSG:25833 nehmen");
+  expect(Object.keys(await stand(page))).toEqual([]);
+  await page.click("#crs-vorschlag button");
+  await fertig(page);
+  await expect(page.locator("#crs")).toHaveValue("EPSG:25833");
+  await expect(page.locator("#source")).toContainText("EPSG:25833 aus Formular");
+  await expect(page.locator("#crs-vorschlag")).toBeHidden();
+  expect((await stand(page))["test_viz:D1"]).toEqual(STELLEN["test_viz:D1"]);
+
+  // weit weg: Gauß-Krüger für ein Netz in UTM
+  await page.fill("#crs", "EPSG:31468");
+  await page.locator("#crs").dispatchEvent("change");
+  await fertig(page);
+  await expect(page.locator("#crs-vorschlag")).toContainText("Mit EPSG:31468 liegt das Netz nicht in Deutschland und keine Dauerzählstelle der Zählkarte in seinem Gebiet. Mit EPSG:25833 wären es 9.");
+});
+
+test("Hintergrundkarte nicht erreichbar: Hinweis an den Knöpfen, die Seite läuft weiter", async ({ page, baseURL }) => {
+  // der Stil kommt an, sein TileJSON (tiles.openfreemap.org/planet) nicht: Die Testseite weist alles
+  // ab, was nicht vom Testserver kommt, wie ein Netz, das OpenFreeMap nicht erreicht
+  const stil = {
+    version: 8,
+    sources: { openmaptiles: { type: "vector", url: "https://tiles.openfreemap.org/planet" } },
+    layers: [
+      { id: "background", type: "background", paint: { "background-color": "#f8f4f0" } },
+      { id: "water", type: "fill", source: "openmaptiles", "source-layer": "water", paint: { "fill-color": "#cad2d3" } },
+    ],
+  };
+  await page.route("https://tiles.openfreemap.org/styles/positron", (route) => route.fulfill({ json: stil, headers: { "Access-Control-Allow-Origin": "*" } }));
+  await oeffne(page, baseURL);
+  await expect(page.locator("#basemap-error")).toBeHidden();
+  await page.click('#basemap button[value="positron"]');
+  await expect(page.locator("#basemap-error")).toHaveText("nicht erreichbar");
+  await expect(page.locator('#basemap button[value="positron"]')).toHaveAttribute("aria-pressed", "true");
+  expect(await stand(page)).toEqual(STELLEN);
+  // „Ohne“ braucht OpenFreeMap nicht
+  await page.click('#basemap button[value="none"]');
+  await expect(page.locator("#basemap-error")).toBeHidden();
 });
 
 test("Ausgaben wie erwartet, Mittel nachgerechnet", async ({ page, baseURL }) => {

@@ -5,7 +5,7 @@
 // Zuordnung von einem anderen Netz (lib/uebertrag.js).
 import { leseNetz, leseLinkGeometrien, istPtLink } from "./lib/netz.js";
 import { istPbf, leseOsm } from "./lib/osm.js";
-import { projektion } from "./lib/crs.js";
+import { projektion, lageMit, randpunkte, KANDIDATEN } from "./lib/crs.js";
 import { LinkIndex, kandidaten, modiVon, naechsterPunkt, VORGABE } from "./lib/zuordnung.js";
 import { siehtNachSumoAus, uebertrage, wegeVonLink } from "./lib/uebertrag.js";
 import { winkelAbstand } from "./lib/richtung.js";
@@ -78,7 +78,7 @@ function bezug(i, s) {
   return { d: n.d, grad: n.grad, anteil: n.anteil, abweichung: s.grad != null && n.grad != null ? winkelAbstand(s.grad, n.grad) : null };
 }
 
-/** Das Netz als GeoJSON in WGS84, ohne pt-Links, in Stücken kodiert; dazu seine Ausdehnung. */
+/** Das Netz als GeoJSON in WGS84, ohne pt-Links, in Stücken kodiert; dazu seine Ausdehnung in WGS84 und in seinen eigenen Koordinaten. */
 function anzeige(links, proj) {
   const enc = new TextEncoder();
   const stuecke = [enc.encode('{"type":"FeatureCollection","features":[')];
@@ -87,6 +87,7 @@ function anzeige(links, proj) {
   let erstes = true;
   let n = 0;
   const bbox = [Infinity, Infinity, -Infinity, -Infinity];
+  const xy = [Infinity, Infinity, -Infinity, -Infinity];
   const flush = () => {
     if (!teile.length) return;
     stuecke.push(enc.encode((erstes ? "" : ",") + teile.join(",")));
@@ -99,7 +100,13 @@ function anzeige(links, proj) {
     if (istPtLink(l.modes)) continue;
     const coords = [];
     for (let k = 0; k + 1 < l.xy.length; k += 2) {
-      const [lon, lat] = proj.zuWgs(l.xy[k], l.xy[k + 1]);
+      const x = l.xy[k];
+      const y = l.xy[k + 1];
+      if (x < xy[0]) xy[0] = x;
+      if (y < xy[1]) xy[1] = y;
+      if (x > xy[2]) xy[2] = x;
+      if (y > xy[3]) xy[3] = y;
+      const [lon, lat] = proj.zuWgs(x, y);
       if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
       if (lon < bbox[0]) bbox[0] = lon;
       if (lat < bbox[1]) bbox[1] = lat;
@@ -127,7 +134,7 @@ function anzeige(links, proj) {
     bytes.set(c, at);
     at += c.length;
   }
-  return { bytes, features: n, bbox: Number.isFinite(bbox[0]) ? bbox : null };
+  return { bytes, features: n, bbox: Number.isFinite(bbox[0]) ? bbox : null, xy: xy.every(Number.isFinite) ? xy : null };
 }
 
 async function ladeNetz(job) {
@@ -172,6 +179,20 @@ async function ladeNetz(job) {
   }
   status("Karte vorbereiten …");
   const karte = anzeige(r.links, proj);
+  // Ohne eigenes CRS: wo das Netz mit dem aus dem Formular und mit den üblichen anderen läge. Die
+  // Seite zählt die Zählstellen darin und schlägt ein anderes vor, wenn mit diesem keine im Netz liegt.
+  let crsProbe = null;
+  if (!osm && !crsDatei && karte.xy) {
+    // die äußersten Punkte wie auf der Karte (ohne pt-Links): umgerechnet fast genau die Ausdehnung
+    const rand = randpunkte(r.links.filter((l) => !istPtLink(l.modes)).map((l) => l.xy), karte.xy);
+    crsProbe = {
+      imLand: Boolean(lageMit(rand, proj)?.imLand),
+      andere: KANDIDATEN.filter((code) => code !== proj.code).flatMap((code) => {
+        const lage = lageMit(rand, code);
+        return lage?.imLand ? [{ code, bbox: lage.bbox }] : [];
+      }),
+    };
+  }
   let metrisch = r.links;
   let meter = null;
   if (proj.geographisch && karte.bbox) {
@@ -196,6 +217,7 @@ async function ladeNetz(job) {
         crsName: proj.name,
         crsAusDatei: Boolean(crsDatei),
         crsPlatzhalter: platzhalter,
+        crsProbe,
         osm: r.osm ?? null,
         wege: r.wegeInfo ?? null,
         stats: r.stats,
