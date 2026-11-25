@@ -36,27 +36,30 @@ for (let r = 0; r < REIHEN; r++) for (let c = 0; c + 1 < SPALTEN; c++) strecken.
 for (let c = 0; c < SPALTEN; c++) for (let r = 0; r + 1 < REIHEN; r++) strecken.push({ a: `k${c}${r}`, b: `k${c}${r + 1}`, name: `Querweg ${c}`, typ: "residential", weg: 200 + c, modes: "car,bike" });
 const links = strecken.flatMap((s) => [{ ...s, id: `${s.a}-${s.b}`, von: s.a, nach: s.b }, { ...s, id: `${s.b}-${s.a}`, von: s.b, nach: s.a }]);
 const attr = (name, wert) => `<attribute name="${name}" class="java.lang.String">${wert}</attribute>`;
-schreibe("netz.xml", `<?xml version="1.0" encoding="UTF-8"?>
+const netzXmlText = ({ crs = "EPSG:25833", rad = "bike" } = {}) => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v2.dtd">
 <network name="testgitter">
 \t<attributes>
-\t\t${attr("coordinateReferenceSystem", "EPSG:25833")}
+\t\t${attr("coordinateReferenceSystem", crs)}
 \t</attributes>
 \t<nodes>
 ${knoten.map((k) => `\t\t<node id="${k.id}" x="${k.x}" y="${k.y}"/>`).join("\n")}
 \t</nodes>
 \t<links capperiod="01:00:00" effectivecellsize="7.5" effectivelanewidth="3.75">
-${links.map((l) => `\t\t<link id="${l.id}" from="${l.von}" to="${l.nach}" length="${D}.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="${l.modes}">
+${links.map((l) => `\t\t<link id="${l.id}" from="${l.von}" to="${l.nach}" length="${D}.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="${l.modes.replace("bike", rad)}">
 \t\t\t<attributes>${attr("name", l.name)}${attr("type", l.typ)}${attr("origid", l.weg)}</attributes>
 \t\t</link>`).join("\n")}
 \t</links>
 </network>
-`);
+`;
+schreibe("netz.xml", netzXmlText());
 
 // dasselbe Netz gepackt: gzip und Zstandard (MATSim mit compressionType = zst)
 const netzXml = readFileSync(join(HIER, "netz.xml"));
 schreibe("netz.xml.gz", gzipSync(netzXml, { level: 9 }));
 schreibe("netz.xml.zst", zstdCompressSync(netzXml));
+// so, wie MATSim schreibt, wenn global.coordinateSystem fehlt („Atlantis“), und mit bicycle statt bike
+schreibe("netz-atlantis.xml.zst", zstdCompressSync(Buffer.from(netzXmlText({ crs: "Atlantis", rad: "bicycle" }))));
 
 // ---------- dasselbe Gitter als OSM-Auszug ----------
 const osmId = (k) => 1000 + k.c * 10 + k.r;

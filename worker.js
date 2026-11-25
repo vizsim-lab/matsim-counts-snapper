@@ -159,12 +159,16 @@ async function ladeNetz(job) {
     }
     r.wegeInfo = { sumo, links: mitWeg };
   }
-  const crsName = osm ? "EPSG:4326" : r.crs ?? job.crs;
+  // „Atlantis“ ist die Vorgabe von MATSims global.coordinateSystem: Ein Netz trägt es, wenn beim
+  // Schreiben kein Koordinatensystem gesetzt war. Es ist keins; dann gilt das aus dem Formular.
+  const platzhalter = r.crs && /^atlantis$/i.test(r.crs.trim()) ? r.crs.trim() : null;
+  const crsDatei = platzhalter ? null : r.crs;
+  const crsName = osm ? "EPSG:4326" : crsDatei ?? job.crs;
   let proj;
   try {
     proj = projektion(crsName);
   } catch (err) {
-    throw new Error(`${r.crs ? "Das CRS des Netzes" : "Das Koordinatensystem aus dem Formular"}: ${err.message}`);
+    throw new Error(`${crsDatei ? "Das CRS des Netzes" : "Das Koordinatensystem aus dem Formular"}: ${err.message}`);
   }
   status("Karte vorbereiten …");
   const karte = anzeige(r.links, proj);
@@ -190,7 +194,8 @@ async function ladeNetz(job) {
         nodes: r.nodes,
         crs: proj.code,
         crsName: proj.name,
-        crsAusDatei: Boolean(r.crs),
+        crsAusDatei: Boolean(crsDatei),
+        crsPlatzhalter: platzhalter,
         osm: r.osm ?? null,
         wege: r.wegeInfo ?? null,
         stats: r.stats,

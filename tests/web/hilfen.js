@@ -31,10 +31,11 @@ export const test = basis.extend({
   },
 });
 
-/** Die Adresse der Seite: Netz und Daten der Zählkarte aus den Testdaten. */
-export function adresse(baseURL, { netz = "netz.xml" } = {}) {
+/** Die Adresse der Seite: Netz und Daten der Zählkarte aus den Testdaten, wahlweise ein CRS fürs Formular. */
+export function adresse(baseURL, { netz = "netz.xml", crs = null } = {}) {
   const teile = [];
   if (netz) teile.push(`net=${baseURL}${FIXTURES}/${netz}`);
+  if (crs) teile.push(`crs=${crs}`);
   teile.push(`daten=${baseURL}${FIXTURES}/zaehlkarte/`, "debug");
   return `/?${teile.join("&")}`;
 }

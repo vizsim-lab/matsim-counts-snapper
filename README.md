@@ -19,7 +19,9 @@ Detektoren der Verkehrsinformationszentrale.
    schreibt, auch gepackt) oder dem Attribut `origgeom`. Zur [Kompression](#gepackte-dateien)
    unten mehr. Gelesen wird wie in [kachelwerk](https://github.com/vizsim-lab/kachelwerk);
    Links ohne `modes` gelten wie in MATSim als `car`, pt-Links bleiben aus der Karte. Das CRS kommt
-   aus dem Netz-Attribut `coordinateReferenceSystem`, sonst aus dem Formular. Oder ein OSM-Auszug
+   aus dem Netz-Attribut `coordinateReferenceSystem`, sonst aus dem Formular. „Atlantis“ zählt als
+   keins: So schreibt MATSim das Attribut, wenn in der Config `global.coordinateSystem` fehlt; die
+   Koordinaten stimmen oft trotzdem, und die Seite nimmt das CRS aus dem Formular, mit Hinweis. Oder ein OSM-Auszug
    (`.osm.pbf`), siehe [unten](#osm-auszug-und-übernahme-auf-ein-anderes-netz). Das Formular zeigt
    nur, was für das geladene Netz gilt: das CRS bei einem MATSim-Netz, die Auswahl der Wege bei
    einem OSM-Auszug. Hierher lässt sich auch eine [Konfiguration](#konfiguration) ziehen, gern
@@ -31,6 +33,8 @@ Detektoren der Verkehrsinformationszentrale.
    oder aus einer Datei, beschränkt die Stellen weiter. Je Gruppe der Zählkarte (`kfz`, `lkw`, `sv`,
    `rad`, `fuss`) lässt sich wählen, ob sie mitkommt, unter welchem `networkMode` sie in die
    counts.xml geht und welche Modi ihr Link erlauben muss. Vorgabe: Kfz als `car`, Rad als `bike`.
+   Erlaubt im Netz kein Link das Verkehrsmittel einer Gruppe, sagt die Seite, welche das Netz kennt;
+   heißt es dort nur anders (`bicycle` statt `bike`), stellt ein Klick die Gruppe um.
    Darunter lassen sich die Kurzzeitzählungen dazunehmen.
 3. **Prüfen:** Für jede Stelle sucht die Seite Links im Umkreis (Vorgabe 50 m), die das
    Verkehrsmittel erlauben und deren Richtung höchstens 60° von der Fahrtrichtung der Stelle
