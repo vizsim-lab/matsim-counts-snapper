@@ -565,12 +565,12 @@ const fileName = (url) => {
   try { return decodeURIComponent(last); } catch { return last; }
 };
 const folderOf = (url) => new URL(".", url).href;
-const artVon = (name) => (/linkgeometr/i.test(name) || /\.csv(\.gz)?$/i.test(name) ? "geometrien" : /\.xml(\.gz)?$|\.pbf$/i.test(name) ? "netz" : /\.json$/i.test(name) ? "konfiguration" : /\.(geojson|poly|zip|shp|prj)$/i.test(name) ? "gebiet" : null);
+const artVon = (name) => (/linkgeometr/i.test(name) || /\.csv(\.gz|\.zst)?$/i.test(name) ? "geometrien" : /\.xml(\.gz|\.zst)?$|\.pbf$/i.test(name) ? "netz" : /\.json$/i.test(name) ? "konfiguration" : /\.(geojson|poly|zip|shp|prj)$/i.test(name) ? "gebiet" : null);
 const istOsmName = (name) => /\.pbf$/i.test(name ?? "");
 
-/** Der Szenario-Stamm eines Dateinamens, wie in kachelwerk: berlin-v7.0-10pct.output_network.xml.gz -> berlin-v7.0. */
+/** Der Szenario-Stamm eines Dateinamens, wie in kachelwerk: berlin-v7.0-10pct.output_network.xml.gz (oder .zst) -> berlin-v7.0. */
 function scenarioStem(name) {
-  return name.toLowerCase().replace(/\.osm\.pbf$|\.pbf$/, "").replace(/\.(xml|csv)(\.gz)?$/, "").split(/[._-]?output_|[._-]?network|[._-]?linkgeometr/)[0].replace(/[._-]\d+(\.\d+)?pct$/, "").replace(/[._-]+$/, "");
+  return name.toLowerCase().replace(/\.osm\.pbf$|\.pbf$/, "").replace(/\.(xml|csv)(\.gz|\.zst)?$/, "").split(/[._-]?output_|[._-]?network|[._-]?linkgeometr/)[0].replace(/[._-]\d+(\.\d+)?pct$/, "").replace(/[._-]+$/, "");
 }
 function stemFit(netName, geoName) {
   const a = scenarioStem(netName);
@@ -689,7 +689,7 @@ async function nimmDateien(files) {
   if (!netz) {
     if (konfig || gebiet.length) return;
     if (geos.length && state.netz) return nimmGeometrie(geos[0]);
-    return setStatus("Darunter ist kein Netz (MATSim network.xml, .xml.gz oder OSM .osm.pbf).", "error");
+    return setStatus("Darunter ist kein Netz (MATSim network.xml, .xml.gz, .xml.zst oder OSM .osm.pbf).", "error");
   }
   const geo = geos.length ? bestGeometry(netz.name, geos.map((g) => ({ name: g.name, file: g })))?.file : null;
   await nimmNetz({

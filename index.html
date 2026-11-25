@@ -317,8 +317,8 @@ code { font: 0.92em var(--font-mono); }
       <h2 id="h-netz"><b>1</b>Netz</h2>
       <label class="drop" id="drop" for="file">
         <strong>Netz wählen oder hierher ziehen</strong>
-        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>). Mit Geometrien passen die Abstände besser. Oder ein OSM-Auszug (<code>.osm.pbf</code>): Dann ist das Ergebnis eine Zuordnung, die sich auf jedes MATSim-Netz übertragen lässt; welche Wege daraus kommen, lässt sich danach wählen. Eine Konfiguration (<code>…-snapper-konfiguration.json</code>, aus Schritt 5) stellt Einstellungen und Entscheidungen wieder her, ein Gebiet (GeoJSON, <code>.poly</code>, Shapefile) beschränkt die Zählstellen; beides gern zusammen mit dem Netz.</small>
-        <input type="file" id="file" multiple accept=".xml,.gz,.csv,.pbf,.json,.geojson,.poly,.zip,.shp,.prj,application/gzip,application/xml,text/xml,text/csv,application/json,application/geo+json,application/zip">
+        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code> oder <code>.xml.zst</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>, auch gepackt). Mit Geometrien passen die Abstände besser. Oder ein OSM-Auszug (<code>.osm.pbf</code>): Dann ist das Ergebnis eine Zuordnung, die sich auf jedes MATSim-Netz übertragen lässt; welche Wege daraus kommen, lässt sich danach wählen. Eine Konfiguration (<code>…-snapper-konfiguration.json</code>, aus Schritt 5) stellt Einstellungen und Entscheidungen wieder her, ein Gebiet (GeoJSON, <code>.poly</code>, Shapefile) beschränkt die Zählstellen; beides gern zusammen mit dem Netz.</small>
+        <input type="file" id="file" multiple accept=".xml,.gz,.zst,.csv,.pbf,.json,.geojson,.poly,.zip,.shp,.prj,application/gzip,application/zstd,application/xml,text/xml,text/csv,application/json,application/geo+json,application/zip">
       </label>
       <details class="svn" id="svn">
         <summary>Aus dem VSP-SVN laden <small>public-svn, countries/de</small></summary>
@@ -335,7 +335,7 @@ code { font: 0.92em var(--font-mono); }
       <div class="source" id="source"><span class="note">Noch kein Netz geladen.</span></div>
       <div class="geo" id="geo" hidden>
         <span id="geo-text"></span>
-        <label class="linkbtn">Geometrien wählen<input type="file" id="geo-file" class="visually-hidden" accept=".csv,.gz,text/csv,application/gzip"></label>
+        <label class="linkbtn">Geometrien wählen<input type="file" id="geo-file" class="visually-hidden" accept=".csv,.gz,.zst,text/csv,application/gzip,application/zstd"></label>
         <button type="button" class="linkbtn" id="geo-clear" hidden>ohne Geometrien</button>
       </div>
       <div class="fields">

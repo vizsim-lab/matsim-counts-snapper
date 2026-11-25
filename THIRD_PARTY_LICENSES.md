@@ -7,6 +7,7 @@ am Ende.
 |---|---|---|
 | MapLibre GL JS 5.6.0 mit gebündelten Paketen | `vendor/maplibre-gl/` | BSD-3-Clause, [gebündelte Pakete](#maplibre-gl-js) |
 | proj4 2.23.0 mit mgrs 1.0.0 und wkt-parser 1.9.0 | `vendor/proj4/` | MIT, [Texte](#proj4) |
+| fzstd 0.1.1 | `vendor/fzstd/` | MIT, [Text](#fzstd) |
 | Schriften Barlow, Barlow Semi Condensed, IBM Plex Mono | `vendor/fonts/` | OFL-1.1 |
 
 MapLibre und die Schriften sind dieselben Dateien wie in
@@ -59,6 +60,12 @@ Nicht in diesem Repository sind:
 `vendor/proj4/proj4.js` ist proj4 2.23.0 aus npm, mit seinen Abhängigkeiten mgrs 1.0.0 und
 wkt-parser 1.9.0 als ein ES-Modul gebündelt (`esbuild --bundle --format=esm --minify`). Die
 Lizenztexte liegen daneben (`LICENSE-*.md`) und stehen unten: [T22](#t22), [T23](#t23), [T24](#t24).
+
+## fzstd
+
+`vendor/fzstd/fzstd.js` ist `esm/index.mjs` von fzstd 0.1.1 aus npm (Arjun Barrett,
+[github.com/101arrowz/fzstd](https://github.com/101arrowz/fzstd)), unverändert, mit `LICENSE`
+daneben ([T28](#t28)). Es entpackt Zstandard (`.zst`), was der Browser selbst nicht kann.
 
 ## Schriften
 
@@ -1208,4 +1215,32 @@ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
 DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
+```
+
+### T28
+
+Aus: fzstd 0.1.1 (LICENSE)
+
+```
+MIT License
+
+Copyright (c) 2020 Arjun Barrett
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```

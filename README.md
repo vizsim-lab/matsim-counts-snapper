@@ -14,9 +14,10 @@ Detektoren der Verkehrsinformationszentrale.
 
 ## Ablauf
 
-1. **Netz:** `network.xml` (auch `.xml.gz`) von der Festplatte oder aus dem VSP-SVN, gern mit den
-   Link-Geometrien (`…-linkGeometries.csv`, wie MATSims SUMO-Konverter sie schreibt) oder dem
-   Attribut `origgeom`. Gelesen wird wie in [kachelwerk](https://github.com/vizsim-lab/kachelwerk);
+1. **Netz:** `network.xml` (auch `.xml.gz` oder `.xml.zst`) von der Festplatte oder aus dem
+   VSP-SVN, gern mit den Link-Geometrien (`…-linkGeometries.csv`, wie MATSims SUMO-Konverter sie
+   schreibt, auch gepackt) oder dem Attribut `origgeom`. Zur [Kompression](#gepackte-dateien)
+   unten mehr. Gelesen wird wie in [kachelwerk](https://github.com/vizsim-lab/kachelwerk);
    Links ohne `modes` gelten wie in MATSim als `car`, pt-Links bleiben aus der Karte. Das CRS kommt
    aus dem Netz-Attribut `coordinateReferenceSystem`, sonst aus dem Formular. Oder ein OSM-Auszug
    (`.osm.pbf`), siehe [unten](#osm-auszug-und-übernahme-auf-ein-anderes-netz). Das Formular zeigt
@@ -362,6 +363,22 @@ Die Adresszeile zeigt auf das geladene Netz und lässt sich teilen, zum Beispiel
 - `daten`: ein anderer Ort für die Daten der Zählkarte (Ordner mit `dauer/`, für die
   Kurzzeitzählungen mit `manifest.json`, `index.json` und `stroeme/`)
 
+## Gepackte Dateien
+
+Netze und Link-Geometrien dürfen unverpackt, mit gzip (`.gz`) oder mit Zstandard (`.zst`) gepackt
+sein; erkannt wird das an den ersten Bytes, nicht am Namen. MATSim schreibt `.zst`, wenn
+`controller.compressionType` auf `zst` steht (die Ausgaben des Sioux-Falls-Szenarios im VSP-SVN
+etwa). gzip entpackt der Browser selbst; Zstandard kann er (Stand Ende 2026) in keinem Browser,
+dafür liegt [fzstd](https://github.com/101arrowz/fzstd) bei (`vendor/fzstd/`, in reinem
+JavaScript). Beides geschieht als Strom: Auch ein großes Netz liegt nie ganz entpackt im
+Speicher. Ein Gitter mit 434.000 Links (108 MB XML) lädt in Chrome als `.zst` in gut 5 s, als
+`.gz` in knapp 5 s; das Lesen des XML kostet mehr als das Entpacken.
+
+Zstandard-Dateien mit einem Wörterbuch (`zstd -D`) oder einem Fenster über 32 MiB (`zstd --long`,
+`--ultra -21` und höher) lehnt die Seite mit einer Meldung ab, statt sie vielleicht falsch zu
+entpacken; die normalen Stufen (bis 19) brauchen höchstens 8 MiB. MATSims dritte Kompression,
+`lz4`, liest die Seite nicht.
+
 ## Hosten
 
 Kein Build-Schritt: Die Seite muss nur über HTTP laufen, weil der Worker ein ES-Modul ist.
@@ -415,7 +432,7 @@ veröffentlicht, geht die Seite ohne Tests online, und der Workflow sagt das als
 - `lib/counts.js`: counts.xml schreiben, Zuordnungs-CSV schreiben und lesen
 - `lib/konfig.js`: Konfiguration bauen und lesen
 - `lib/gebiet.js`: Gebiet aus GeoJSON, `.poly` oder Shapefile (auch gezippt), Punkt im Gebiet
-- `vendor/`: MapLibre GL JS, proj4, Schriften
+- `vendor/`: MapLibre GL JS, proj4, fzstd (Zstandard entpacken), Schriften
 - `tests/`: Tests der Bausteine, `npm test` (Node 20 oder neuer, ohne Abhängigkeiten); in
   `tests/web/` die Browser-Tests mit Testdaten und erwarteten Dateien, `npm run test:web`
 - `playwright.config.js`, `.github/workflows/pruefen.yml`: Browser-Tests, Prüfen vor dem Veröffentlichen
