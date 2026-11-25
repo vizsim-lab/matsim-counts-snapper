@@ -143,12 +143,11 @@ und sie gehen weder in die counts.xml noch in die Zuordnung. Gerichtet sind etwa
 Detektoren, die Dauerzählstellen in Baden-Württemberg und Bayern und ein Teil der Hamburger
 Stellen.
 
-Die Berliner Rad-Zählstellen nennen ihre Richtung in den Daten bis November 2026 nicht im Feld
-`richtung`, sondern im Namen („Jannowitzbrücke Nord“) oder in der Kennung („01-MI-AL-W“). Berlin
-führt sie als Richtungszählstellen, je Fahrtrichtung eine; die Seite liest die Richtung darum für
-diese Quelle aus Name oder Kennung, solange das Feld leer ist. So kommen 23 der 33 Stellen hinein;
-die übrigen nennen keine Richtung. Die Zählkarte füllt das Feld künftig selbst
-([zaehlkarte#44](https://github.com/vizsim-lab/zaehlkarte/pull/44)).
+Die Richtung kommt nur aus dem Feld `richtung`, für alle Quellen gleich; aus Namen oder Kennungen
+liest die Seite keine. Die Berliner Rad-Zählstellen (Richtungszählstellen, je Fahrtrichtung eine)
+tragen sie dort seit [zaehlkarte#44](https://github.com/vizsim-lab/zaehlkarte/pull/44): Mit den
+Daten vom 23.11.2026 sind 23 der 33 Stellen gerichtet, die übrigen 10 nennen keine Richtung und
+werden nur angezeigt.
 
 Die Zählkarte rechnet nichts um und füllt nichts auf; das gilt hier auch: Nicht gezählte Stunden
 bleiben leer, Tage mit doppelter Stunde 2–3 Uhr (Zeitumstellung) bleiben draußen, und es gibt
@@ -382,8 +381,6 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
 - Stellen, die beide Richtungen zusammen zählen, zuordnen: beide Links und die gezählte Summe,
   für eine eigene Auswertung (MATSims Vergleich kennt keine Summe über zwei Links)
 - Stundenwerte über ganze Jahre (die Zählkarte gibt für die Karte nur die jüngsten 12 Monate aus)
-- die Sonderregel für die Berliner Rad-Zählstellen streichen, sobald die Zählkarte das Feld
-  `richtung` füllt (zaehlkarte#44) und neu gebaut hat
 - Netze aus MATSims `OsmNetworkReader` tragen keinen OSM-Weg: Übernahme dort nur über ID und Lage
 - den Netz-Leser mit kachelwerk teilen statt ihn zu kopieren
 

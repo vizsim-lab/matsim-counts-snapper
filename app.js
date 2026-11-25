@@ -6,7 +6,7 @@
 // Ausfahrt, je Querschnitt die Fahrtrichtungen. Sie sind eine zweite Familie von Stellen
 // (`familie: "kurz"`), gehen nach den Dauerzählstellen an die Links und in eine eigene Datei.
 import { STANDARD_DATEN, VERTRAG, GRUPPEN, leseIndex, leseStunden, detailPfad, tagNr, isoTag, wochentag } from "./lib/zaehlkarte.js";
-import { kurz, lang } from "./lib/richtung.js";
+import { kurz } from "./lib/richtung.js";
 import { verteile } from "./lib/zuordnung.js";
 import { VORGABE as MITTEL_VORGABE, WOCHENTAGE, mittle, aggregatText, auswahlText } from "./lib/mitteln.js";
 import { countsXml, zuordnungCsv, leseZuordnungCsv } from "./lib/counts.js";
@@ -1612,8 +1612,8 @@ function lageVon(s) {
   return lage;
 }
 const zaehle = (lage) => state.stellen.filter((s) => lageVon(s) === lage).length;
-/** Die Richtung einer Stelle in Worten; steht sie nur im Namen oder in der Kennung, mit Hinweis. */
-const richtungsText = (s) => s.richtungText || (s.r.ausNamen ? `Richtung ${lang(s.r.grad)} (aus Name oder Kennung)` : "");
+/** Die Richtung einer Stelle in Worten, wie die Quelle sie nennt. */
+const richtungsText = (s) => s.richtungText || "";
 
 // ---------- Entscheidungen ----------
 const speicherSchluessel = () => (state.netz ? `snapper.entscheide:${state.netz.key}` : null);

@@ -5,7 +5,7 @@ import { richtung, kompass, kurz, winkelAbstand } from "../lib/richtung.js";
 import { crsDefinition, projektion } from "../lib/crs.js";
 import { leseNetz, leseLinkGeometrien } from "../lib/netz.js";
 import { LinkIndex, kandidaten, verteile, naechsterPunkt, namePasst, erlaubt } from "../lib/zuordnung.js";
-import { leseIndex, tagArt, tagNr, isoTag, wochentag, leseStunden, richtungAusNamen } from "../lib/zaehlkarte.js";
+import { leseIndex, tagArt, tagNr, isoTag, wochentag, leseStunden } from "../lib/zaehlkarte.js";
 import { mittle, tagGilt, aggregatText, auswahlText, zeitraum, VORGABE } from "../lib/mitteln.js";
 import { countsXml, zuordnungCsv, leseZuordnungCsv, zahl } from "../lib/counts.js";
 
@@ -211,29 +211,29 @@ test("zaehlkarte: Index, Lizenzen, Kalender, Tage", () => {
   assert.throws(() => leseIndex({}), /keine dauer\/index.json/);
 });
 
-test("zaehlkarte: Berliner Rad-Zählstellen tragen die Richtung im Namen oder in der Kennung", () => {
-  const stelle = (id, quelle, name) => [id, quelle, name, null, null, 13.4, 52.5, "2020-01-01", "2025-12-31", 8, "11000000", 0];
+test("zaehlkarte: die Richtung kommt nur aus dem Feld richtung, nie aus Name oder Kennung", () => {
+  const stelle = (id, quelle, name, richtung = null) => [id, quelle, name, null, richtung, 13.4, 52.5, "2020-01-01", "2025-12-31", 8, "11000000", 0];
   const d = leseIndex({
     ...INDEX,
     quellen: [...INDEX.quellen, { code: "berlin_rad", land: "BE", lizenzen: [{ code: "berlin_rad", lizenz: "dl-de/zero-2-0" }] }, { code: "mobidata_rad", land: "BW", lizenzen: [{ code: "mobidata_rad", lizenz: "dl-de/by-2-0" }] }],
     stellen: {
       felder: INDEX.stellen.felder,
       werte: [
-        stelle("berlin_rad:02-MI-JAN-N", "berlin_rad", "Jannowitzbrücke Nord"),
+        // seit zaehlkarte#44 mit Richtung im Feld, wie bei jeder Quelle
+        stelle("berlin_rad:02-MI-JAN-N", "berlin_rad", "Jannowitzbrücke", "Richtung Norden"),
+        stelle("berlin_rad:01-MI-AL-W", "berlin_rad", "Karl-Marx-Allee", "Richtung Westen"),
+        // ohne Feld bleibt die Stelle ohne Richtung, auch mit „Nord“ im Namen oder „-W“ in der Kennung
         stelle("berlin_rad:03-MI-SAN-W", "berlin_rad", "Invalidenstraße West"),
-        stelle("berlin_rad:01-MI-AL-W", "berlin_rad", "Karl-Marx-Allee"),
         stelle("berlin_rad:04-MI-NO", "berlin_rad", "Nordufer"),
-        stelle("berlin_rad:12-PA-SCH", "berlin_rad", "Schwedter Steg"),
         stelle("mobidata_rad:100027946", "mobidata_rad", "Route Nord"),
       ],
     },
   });
   assert.deepEqual(d.stellen.map((s) => [s.r.art, s.r.grad]), [
-    ["gerichtet", 0], ["gerichtet", 270], ["gerichtet", 270], ["ohne", null], ["ohne", null], ["ohne", null],
+    ["gerichtet", 0], ["gerichtet", 270], ["ohne", null], ["ohne", null], ["ohne", null],
   ]);
-  assert.equal(d.stellen[0].r.ausNamen, true);
-  assert.equal(richtungAusNamen("Messe-Allee (Ost-West)", "1"), null);
-  assert.equal(richtungAusNamen("Mariendorfer Damm Süd", "20-TS-MAR-S"), 180);
+  assert.equal(d.stellen[0].richtungText, "Richtung Norden");
+  assert.equal(d.stellen[2].richtungText, null);
 });
 
 test("mitteln: Tage wählen, Mittel, Median, Mindestzahl, Zeitumstellung", () => {
