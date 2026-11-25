@@ -13,19 +13,24 @@ import { countsXml, zuordnungCsv, leseZuordnungCsv } from "./lib/counts.js";
 import { OSM_FILTER } from "./lib/osm.js";
 import { baueKonfiguration, leseKonfiguration, entscheidung as konfigEntscheidung } from "./lib/konfig.js";
 import { crsVorschlag } from "./lib/crsvorschlag.js";
+import { tx, sprache, setzeSprache, zahl, anzahl, VORGABE as SPRACHE_VORGABE } from "./lib/sprache.js";
 import { baueGebiet, imGebiet as punktImGebiet, gebietGeojson, leseGeojson, lesePoly, leseShp, leseZip, crsAusPrj, siehtNachGradAus, umrechnen, ueberschneidet, VEREINFACHT_M } from "./lib/gebiet.js";
 import { STROEME_VERTRAG, KURZ_GRUPPEN, KURZ_VORGABE, TAGTYP, leseManifest, leseStellen, stroemePfad, waehleZaehlungen, punkte as kurzPunkte, lizenzenVon } from "./lib/kurzzeit.js";
 
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const de = (n, digits = 0) => Number(n).toLocaleString("de-DE", { maximumFractionDigits: digits, minimumFractionDigits: digits });
-/** 1 Entscheidung, 2 Entscheidungen */
-const anzahl = (n, eins, viele) => `${de(n)} ${n === 1 ? eins : viele}`;
-/** 2026-11-23 -> 23.11.2026; anderes bleibt, wie es ist. */
-const deDatum = (iso) => (typeof iso === "string" && /^\d{4}-\d{2}-\d{2}/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : iso ?? "?");
-const mb = (bytes) => `${de(bytes / 1048576, bytes < 10485760 ? 1 : 0)} MB`;
+// Die Sprache der Oberfläche steht in <html lang>, gesetzt vom Skript im Kopf der Seite (?lang=,
+// sonst die gemerkte Wahl, sonst Englisch); Texte entstehen mit tx("Deutsch", "English").
+setzeSprache(document.documentElement.lang);
+// Zahlen und Daten wie in der Sprache üblich: 1.234,5 oder 1,234.5 (lib/sprache.js); anzahl() von dort
+const nr = zahl;
+/** Zahlen in Ausgaben (counts.xml, Zuordnung): immer wie bisher deutsch, gleich in jeder Sprache. */
+const nrAusgabe = (n, digits = 0) => Number(n).toLocaleString("de-DE", { maximumFractionDigits: digits, minimumFractionDigits: digits });
+/** 2026-11-23 -> 23.11.2026 auf Deutsch, auf Englisch bleibt es so; anderes bleibt, wie es ist. */
+const datumAnzeige = (iso) => (typeof iso === "string" && /^\d{4}-\d{2}-\d{2}/.test(iso) ? (sprache() === "de" ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : iso.slice(0, 10)) : iso ?? "?");
+const mb = (bytes) => `${nr(bytes / 1048576, bytes < 10485760 ? 1 : 0)} MB`;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const reason = (err) => (err?.name === "TypeError" ? "nicht erreichbar oder vom Browser blockiert" : err?.message ?? String(err));
+const reason = (err) => (err?.name === "TypeError" ? tx("nicht erreichbar oder vom Browser blockiert", "unreachable or blocked by the browser") : err?.message ?? String(err));
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
   set(key, value) { try { localStorage.setItem(key, value); } catch { /* privater Modus, Speicher gesperrt */ } },
@@ -44,7 +49,11 @@ const BEISPIEL = {
 };
 const LAGEN = ["pruefen", "ohne", "passt", "geprueft", "aus", "quer"];
 // „quer“: eine Dauerzählstelle, die beide Richtungen zusammen zählt oder keine nennt; nur angezeigt
-const LAGE_TEXT = { passt: "passt", pruefen: "prüfen", geprueft: "geprüft", ohne: "ohne Link", aus: "ausgelassen", quer: "nicht richtungsfein" };
+const LAGE_TEXTE = {
+  de: { passt: "passt", pruefen: "prüfen", geprueft: "geprüft", ohne: "ohne Link", aus: "ausgelassen", quer: "nicht richtungsfein" },
+  en: { passt: "matched", pruefen: "to review", geprueft: "reviewed", ohne: "no link", aus: "skipped", quer: "not directional" },
+};
+const lageText = (l) => LAGE_TEXTE[sprache()][l] ?? l;
 const LAGE_FARBE = { passt: "--st-passt", pruefen: "--st-pruefen", geprueft: "--st-geprueft", ohne: "--st-ohne", aus: "--st-aus", quer: "--st-quer" };
 const GRUPPE_FARBE = { kfz: "#1f4ea3", lkw: "#c0522b", sv: "#8f4fb3", rad: "#2e7d32", fuss: "#6b7785" };
 const WEIT_M = 20; // ab hier ist eine Zuordnung zu prüfen
@@ -97,6 +106,12 @@ const state = {
   },
 };
 const KURZ_LISTE_MAX = 400; // so viele Stellen zeigt die Liste höchstens, die gewählte immer
+/** Der Name einer Gruppe: auf Deutsch wie in den Daten der Zählkarte, auf Englisch wie in ihrer englischen Oberfläche. */
+const GRUPPEN_NAMEN = {
+  de: { kfz: "Kfz", lkw: "Lkw", sv: "Schwerverkehr", rad: "Rad", fuss: "Fuß" },
+  en: { kfz: "Motor vehicles", lkw: "Trucks", sv: "Heavy vehicles", rad: "Cyclists", fuss: "Pedestrians" },
+};
+const gruppenName = (g, namen = state.daten?.gruppenNamen) => (sprache() === "de" ? namen?.[g] ?? GRUPPEN_NAMEN.de[g] : GRUPPEN_NAMEN.en[g]) ?? g;
 // Familien: dauer (gerichtete Dauerzählstellen), kurz (Kurzzeit-Punkte), quer (Dauerzählstellen
 // ohne Richtung: auf Karte und Liste, aber ohne Linksuche, Zuordnung und Ausgabe)
 const familieVon = (s) => s?.familie ?? "dauer";
@@ -104,7 +119,11 @@ const familieVon = (s) => s?.familie ?? "dauer";
 const familieVonId = (id) => (String(id).includes("/") ? "kurz" : "dauer");
 
 // ---------- Status ----------
+// Der Text darf eine Funktion sein: Beim Wechsel der Sprache baut sie ihn neu (renderSprache).
+let letzterStatus = null;
 function setStatus(text, kind = "busy", pct = null) {
+  letzterStatus = { text, kind, pct };
+  if (typeof text === "function") text = text();
   $("status-text").textContent = text;
   $("status").dataset.state = kind;
   const bar = $("bar");
@@ -114,7 +133,7 @@ function setStatus(text, kind = "busy", pct = null) {
   if (kind === "busy" || !netzLaedt) {
     $("busy").hidden = kind !== "busy";
     $("busy").textContent = text;
-  } else $("busy").textContent = "Netz zeichnen …";
+  } else $("busy").textContent = tx("Netz zeichnen …", "Drawing the network …");
 }
 
 // ---------- Worker ----------
@@ -125,7 +144,7 @@ function frage(msg, transfer = []) {
   const t = ++token;
   return new Promise((resolve, reject) => {
     offen.set(t, { resolve, reject });
-    worker.postMessage({ ...msg, token: t }, transfer);
+    worker.postMessage({ ...msg, token: t, sprache: sprache() }, transfer);
   });
 }
 worker.onmessage = (e) => {
@@ -138,7 +157,7 @@ worker.onmessage = (e) => {
   else o.resolve(m);
 };
 worker.onerror = (e) => {
-  for (const o of offen.values()) o.reject(new Error(e.message || "Der Worker ist abgestürzt."));
+  for (const o of offen.values()) o.reject(new Error(e.message || tx("Der Worker ist abgestürzt.", "The worker crashed.")));
   offen.clear();
 };
 
@@ -268,7 +287,7 @@ let netzLaedt = false;
 function netzZeichnen(an) {
   netzLaedt = an;
   if (an) {
-    $("busy").textContent = "Netz zeichnen …";
+    $("busy").textContent = tx("Netz zeichnen …", "Drawing the network …");
     $("busy").hidden = false;
   } else if ($("status").dataset.state !== "busy") $("busy").hidden = true;
 }
@@ -399,8 +418,8 @@ function markBasemap(name) {
 }
 function basemapNichtDa() {
   const e = $("basemap-error");
-  e.textContent = "nicht erreichbar";
-  e.title = "OpenFreeMap antwortet nicht. Netz, Zählstellen und Ausgaben gehen trotzdem; ein Klick auf Positron oder Dark versucht es noch einmal.";
+  e.textContent = tx("nicht erreichbar", "unreachable");
+  e.title = tx("OpenFreeMap antwortet nicht. Netz, Zählstellen und Ausgaben gehen trotzdem; ein Klick auf Positron oder Dark versucht es noch einmal.", "OpenFreeMap does not respond. Network, counting stations and outputs work anyway; clicking Positron or Dark tries again.");
   e.hidden = false;
 }
 async function setBasemap(name) {
@@ -506,29 +525,29 @@ function zeigeLinks(lngLat, links, s) {
   const div = document.createElement("div");
   div.className = "linkwahl";
   const kannZuordnen = s && lageVon(s) !== "aus";
-  if (state.pick && s) div.insertAdjacentHTML("beforeend", `<p class="note" style="margin:0 0 6px">Hier liegen ${links.length} Links. Welcher gehört zu ${esc(s.name || s.id)}?</p>`);
+  if (state.pick && s) div.insertAdjacentHTML("beforeend", `<p class="note" style="margin:0 0 6px">${tx(`Hier liegen ${links.length} Links. Welcher gehört zu ${esc(s.name || s.id)}?`, `There are ${links.length} links here. Which one belongs to ${esc(s.name || s.id)}?`)}</p>`);
   for (const l of links) {
     const zeilen = [
-      ["Richtung", l.grad != null ? `${kurz(l.grad)} ${de(l.grad)}°${l.abweichung != null ? `, ${de(l.abweichung)}° Abweichung` : ""}` : null],
-      ["Abstand", s && l.d != null ? `${de(l.d, 1)} m` : null],
+      [tx("Richtung", "Direction"), l.grad != null ? `${kurz(l.grad)} ${nr(l.grad)}°${l.abweichung != null ? tx(`, ${nr(l.abweichung)}° Abweichung`, `, ${nr(l.abweichung)}° off`) : ""}` : null],
+      [tx("Abstand", "Distance"), s && l.d != null ? `${nr(l.d, 1)} m` : null],
       ["modes", l.modes || "(car)"], ["type", l.type], ["name", l.name],
-      ["Tempo", l.kmh != null ? `${de(l.kmh, 1)} km/h` : null], ["capacity", l.capacity != null && !l.osm ? `${de(l.capacity)} Fz/h` : null],
+      [tx("Tempo", "Speed"), l.kmh != null ? `${nr(l.kmh, 1)} km/h` : null], ["capacity", l.capacity != null && !l.osm ? `${nr(l.capacity)} ${tx("Fz/h", "veh/h")}` : null],
     ].filter(([, v]) => v != null && v !== "");
     const box = document.createElement("div");
     box.className = "linkwahl-eintrag";
-    box.innerHTML = `<strong>${kompassSvg(l.grad)}${l.osm ? "Kante" : "Link"} ${esc(l.id)}</strong><dl class="linkinfo">${zeilen.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}${l.weg ? `<dt>OSM-Weg</dt><dd>${wegHtml(l.weg)}</dd>` : ""}</dl>`;
+    box.innerHTML = `<strong>${kompassSvg(l.grad)}${l.osm ? tx("Kante", "Edge") : "Link"} ${esc(l.id)}</strong><dl class="linkinfo">${zeilen.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}${l.weg ? `<dt>${tx("OSM-Weg", "OSM way")}</dt><dd>${wegHtml(l.weg)}</dd>` : ""}</dl>`;
     if (kannZuordnen && linkVon(s)?.id !== l.id) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "btn small";
-      b.textContent = `${s.name || s.id} zuordnen`;
+      b.textContent = tx(`${s.name || s.id} zuordnen`, `Assign to ${s.name || s.id}`);
       b.addEventListener("click", () => {
         popup?.remove();
         pickEnde();
         nimmLink(s.id, { i: l.i, link: l });
       });
       box.append(b);
-    } else if (kannZuordnen) box.insertAdjacentHTML("beforeend", '<span class="note">gehört schon zu dieser Stelle</span>');
+    } else if (kannZuordnen) box.insertAdjacentHTML("beforeend", `<span class="note">${tx("gehört schon zu dieser Stelle", "already belongs to this station")}</span>`);
     div.append(box);
   }
   popup = new maplibregl.Popup({ maxWidth: "300px" }).setLngLat(lngLat).setDOMContent(div).addTo(map);
@@ -539,19 +558,20 @@ function wegHtml(weg) {
   if (!weg) return "";
   const id = String(weg).replace(/^-/, "");
   if (!/^\d+$/.test(id)) return esc(weg);
-  return `<a href="https://www.openstreetmap.org/way/${id}" target="_blank" rel="noopener">${id}</a>${String(weg).startsWith("-") ? " (gegen die Zeichenrichtung)" : ""}`;
+  return `<a href="https://www.openstreetmap.org/way/${id}" target="_blank" rel="noopener">${id}</a>${String(weg).startsWith("-") ? tx(" (gegen die Zeichenrichtung)", " (against the direction of the way)") : ""}`;
 }
 
-const WIE = {
-  id: "gleiche Link-ID am selben Ort",
-  weg: "gleicher OSM-Weg in derselben Richtung",
-  lage: "einziger passender Link am übernommenen Punkt",
-};
+/** Wie eine übernommene Zuordnung ihren Link fand (lib/uebertrag.js). */
+const wieText = (wie) => ({
+  id: tx("gleiche Link-ID am selben Ort", "same link ID at the same place"),
+  weg: tx("gleicher OSM-Weg in derselben Richtung", "same OSM way in the same direction"),
+  lage: tx("einziger passender Link am übernommenen Punkt", "only matching link at the transferred point"),
+})[wie];
 
 // ---------- Netz laden ----------
 let laden = null;
 async function fetchBytes(url, label, signal) {
-  setStatus(`${label} laden …`);
+  setStatus(tx(`${label} laden …`, `Loading ${label} …`));
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const total = Number(res.headers.get("content-length")) || 0;
@@ -568,7 +588,7 @@ async function fetchBytes(url, label, signal) {
     if (performance.now() - shown > 150) {
       shown = performance.now();
       const known = total >= got;
-      setStatus(`${label} laden … ${mb(got)}${known ? ` von ${mb(total)}` : ""}`, "busy", known ? (100 * got) / total : null);
+      setStatus(tx(`${label} laden … ${mb(got)}${known ? ` von ${mb(total)}` : ""}`, `Loading ${label} … ${mb(got)}${known ? ` of ${mb(total)}` : ""}`), "busy", known ? (100 * got) / total : null);
     }
   }
   const bytes = new Uint8Array(got);
@@ -627,7 +647,7 @@ function netzWeg() {
 }
 
 async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = null, geoUrl = null, beispiel = false, datei = null, geoDatei = null }) {
-  const nr = ++state.ladeNr;
+  const ladeNr = ++state.ladeNr;
   pickEnde();
   popup?.remove();
   state.netz = null;
@@ -641,7 +661,7 @@ async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = nu
   renderAlles();
   renderAuswahl();
   renderQuelle({ name, url, geoName, beispiel, laeuft: true });
-  setStatus(`${name} lesen …`);
+  setStatus(tx(`${name} lesen …`, `Reading ${name} …`));
   const kopie = { name, geoName, url, geoUrl, beispiel, datei, geoDatei };
   state.letzterVersuch = kopie;
   try {
@@ -651,7 +671,7 @@ async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = nu
     // bleibt für das nächste Netz, wie es ist (sonst läse ein Netz mit „Atlantis“ in Gauß-Krüger).
     const crs = beispiel ? BEISPIEL.crs : $("crs").value.trim();
     const r = await frage({ type: "netz", name, bytes, geoBytes, crs, osmFilter: $("osm-filter").value }, transfer);
-    if (nr !== state.ladeNr) return;
+    if (ladeNr !== state.ladeNr) return;
     const info = r.info;
     if (beispiel) info.crsBeispiel = true;
     netzWeg();
@@ -665,7 +685,7 @@ async function nimmNetz({ name, bytes, geoName = null, geoBytes = null, url = nu
     ladeEntscheide();
     await waehleStellen();
   } catch (err) {
-    if (nr !== state.ladeNr) return;
+    if (ladeNr !== state.ladeNr) return;
     netzWeg();
     renderQuelle(null);
     setStatus(`${name}: ${err.message}`, "error");
@@ -681,13 +701,13 @@ async function ladeNetzVonUrl({ net, geo = "auto", beispiel = false }) {
     // ein OSM-Auszug und das Beispiel haben keine Geometrien daneben („auto“ ist keine Datei)
     if (geo === "auto") {
       if (!beispiel && !istOsmName(net)) {
-        setStatus("Link-Geometrien suchen …");
+        setStatus(tx("Link-Geometrien suchen …", "Looking for link geometries …"));
         geoUrl = (await findGeometry(net).catch(() => ({ match: null }))).match?.url ?? null;
       }
     } else if (geo && geo !== "0" && !beispiel && !istOsmName(net)) {
       geoUrl = new URL(geo, folderOf(net)).href;
     }
-    const bytes = await fetchBytes(net, beispiel ? "Beispielnetz von GitHub" : name, ctrl.signal);
+    const bytes = await fetchBytes(net, beispiel ? tx("Beispielnetz von GitHub", "example network from GitHub") : name, ctrl.signal);
     const geoBytes = geoUrl ? await fetchBytes(geoUrl, fileName(geoUrl), ctrl.signal) : null;
     if (ctrl.signal.aborted) return;
     laden = null;
@@ -695,7 +715,7 @@ async function ladeNetzVonUrl({ net, geo = "auto", beispiel = false }) {
   } catch (err) {
     if (ctrl.signal.aborted) return;
     laden = null;
-    setStatus(`${beispiel ? "Das Beispielnetz" : name} ließ sich nicht laden (${reason(err)}).`, "error");
+    setStatus(tx(`${beispiel ? "Das Beispielnetz" : name} ließ sich nicht laden (${reason(err)}).`, `${beispiel ? "The example network" : name} could not be loaded (${reason(err)}).`), "error");
   }
 }
 
@@ -712,7 +732,7 @@ async function nimmDateien(files) {
   if (!netz) {
     if (konfig || gebiet.length) return;
     if (geos.length && state.netz) return nimmGeometrie(geos[0]);
-    return setStatus("Darunter ist kein Netz (MATSim network.xml, .xml.gz, .xml.zst oder OSM .osm.pbf).", "error");
+    return setStatus(tx("Darunter ist kein Netz (MATSim network.xml, .xml.gz, .xml.zst oder OSM .osm.pbf).", "None of these is a network (MATSim network.xml, .xml.gz, .xml.zst or OSM .osm.pbf)."), "error");
   }
   const geo = geos.length ? bestGeometry(netz.name, geos.map((g) => ({ name: g.name, file: g })))?.file : null;
   await nimmNetz({
@@ -739,7 +759,7 @@ async function nimmGeometrie(file) {
     const bytes = await netzBytes(n);
     await nimmNetz({ ...n, bytes, geoName: file.name, geoBytes: new Uint8Array(await file.arrayBuffer()), geoDatei: file, geoUrl: null });
   } catch (err) {
-    setStatus(`${n.name} ließ sich nicht neu lesen (${reason(err)}).`, "error");
+    setStatus(tx(`${n.name} ließ sich nicht neu lesen (${reason(err)}).`, `${n.name} could not be read again (${reason(err)}).`), "error");
   }
 }
 
@@ -754,7 +774,7 @@ async function nochmal() {
     const geoBytes = n.geoDatei ? new Uint8Array(await n.geoDatei.arrayBuffer()) : null;
     await nimmNetz({ ...n, bytes, geoBytes });
   } catch (err) {
-    setStatus(`${n.name} ließ sich nicht neu lesen (${reason(err)}).`, "error");
+    setStatus(tx(`${n.name} ließ sich nicht neu lesen (${reason(err)}).`, `${n.name} could not be read again (${reason(err)}).`), "error");
   }
 }
 
@@ -782,8 +802,10 @@ drop.addEventListener("drop", (e) => {
   nimmDateien(e.dataTransfer.files);
 });
 $("beispiel").addEventListener("click", () => ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true }));
-{
+/** Die Auswahl der Wege aus OSM, in der Sprache der Seite; die Wahl bleibt. */
+function renderOsmFilter() {
   const sel = $("osm-filter");
+  const wert = sel.value;
   sel.replaceChildren(...Object.entries(OSM_FILTER).map(([code, f]) => {
     const o = document.createElement("option");
     o.value = code;
@@ -791,6 +813,12 @@ $("beispiel").addEventListener("click", () => ladeNetzVonUrl({ net: BEISPIEL.url
     o.title = f.text;
     return o;
   }));
+  if (wert) sel.value = wert;
+  $("osm-filter-text").textContent = OSM_FILTER[sel.value]?.text ?? "";
+}
+{
+  const sel = $("osm-filter");
+  renderOsmFilter();
   const gemerkt = store.get("snapper.osmFilter");
   if (gemerkt && OSM_FILTER[gemerkt]) sel.value = gemerkt;
   const hilfe = () => { $("osm-filter-text").textContent = OSM_FILTER[sel.value]?.text ?? ""; };
@@ -826,11 +854,11 @@ function renderCrsVorschlag() {
   const info = state.netz?.info;
   const probe = info?.crsProbe;
   const d = state.daten;
-  const zahl = (bbox) => (!d ? null : bbox ? imKasten(d.stellen, bbox).length : 0);
-  const v = probe && !crsFest(info) ? crsVorschlag({ code: info.crs, imLand: probe.imLand, stellen: zahl(info.bbox) }, probe.andere.map((k) => ({ code: k.code, stellen: zahl(k.bbox) }))) : null;
+  const imNetz = (bbox) => (!d ? null : bbox ? imKasten(d.stellen, bbox).length : 0);
+  const v = probe && !crsFest(info) ? crsVorschlag({ code: info.crs, imLand: probe.imLand, stellen: imNetz(info.bbox) }, probe.andere.map((k) => ({ code: k.code, stellen: imNetz(k.bbox) }))) : null;
   feld.hidden = !v;
   if (!v) return;
-  const knoepfe = v.besser.map((k) => ` <button type="button" class="linkbtn" data-crs="${esc(k.code)}">${esc(k.code)} nehmen</button>`).join("");
+  const knoepfe = v.besser.map((k) => ` <button type="button" class="linkbtn" data-crs="${esc(k.code)}">${esc(tx(`${k.code} nehmen`, `Use ${k.code}`))}</button>`).join("");
   feld.querySelector("small").innerHTML = `${esc(v.text)}${knoepfe}`;
 }
 $("crs-vorschlag").addEventListener("click", (e) => {
@@ -851,8 +879,11 @@ function renderQuelle(n) {
   const platzhalter = n?.info?.crsPlatzhalter;
   $("crs-platzhalter").hidden = !platzhalter;
   if (platzhalter) {
-    const wie = n.info.crs === $("crs").defaultValue ? ", der Vorgabe hier" : " aus dem Feld";
-    $("crs-platzhalter").querySelector("small").textContent = `Das Netz nennt „${platzhalter}“ als Koordinatensystem: So schreibt MATSim es, wenn in der Config global.coordinateSystem fehlt. Gelesen mit ${n.info.crs}${wie}; liegt das Netz auf der Karte am falschen Ort, hier das richtige eintragen.`;
+    const vorgabe = n.info.crs === $("crs").defaultValue;
+    $("crs-platzhalter").querySelector("small").textContent = tx(
+      `Das Netz nennt „${platzhalter}“ als Koordinatensystem: So schreibt MATSim es, wenn in der Config global.coordinateSystem fehlt. Gelesen mit ${n.info.crs}${vorgabe ? ", der Vorgabe hier" : " aus dem Feld"}; liegt das Netz auf der Karte am falschen Ort, hier das richtige eintragen.`,
+      `The network names “${platzhalter}” as its coordinate system: MATSim writes this when global.coordinateSystem is missing in the config. Read with ${n.info.crs}${vorgabe ? ", the default here" : " from the field"}; if the network is in the wrong place on the map, enter the right one here.`,
+    );
   }
   renderCrsVorschlag();
   // nur die Felder, die für das Netz gelten: der OSM-Filter beim OSM-Auszug, das CRS beim MATSim-Netz
@@ -862,7 +893,7 @@ function renderQuelle(n) {
   const box = $("source");
   box.replaceChildren();
   if (!n) {
-    box.innerHTML = '<span class="note">Noch kein Netz geladen.</span>';
+    box.innerHTML = `<span class="note">${tx("Noch kein Netz geladen.", "No network loaded yet.")}</span>`;
     return;
   }
   const name = document.createElement(n.url ? "a" : "span");
@@ -874,22 +905,24 @@ function renderQuelle(n) {
     name.rel = "noopener";
   }
   box.append(name);
-  if (n.beispiel) box.append(chip("Beispiel", "example"));
+  if (n.beispiel) box.append(chip(tx("Beispiel", "Example"), "example"));
   const osm = n.info?.osm;
   if (osm) {
-    box.append(chip("OSM-Auszug", "fit"));
-    box.append(chip(`${de(osm.wege)} Wege, ${de(n.info.links)} Kanten`));
-    box.append(chip(osm.filter));
+    box.append(chip(tx("OSM-Auszug", "OSM extract"), "fit"));
+    box.append(chip(tx(`${nr(osm.wege)} Wege, ${nr(n.info.links)} Kanten`, `${nr(osm.wege)} ways, ${nr(n.info.links)} edges`)));
+    box.append(chip(OSM_FILTER[osm.filterCode]?.name ?? osm.filter));
   } else if (n.info) {
-    box.append(chip(`${de(n.info.links)} Links`));
-    const crs = chip(n.info.crs + (crsFest(n.info) ? "" : " aus Formular"), crsFest(n.info) ? "fit" : "");
-    if (n.info.crsPlatzhalter) crs.title = `Das Netz nennt „${n.info.crsPlatzhalter}“: MATSims Vorgabe, wenn beim Schreiben kein Koordinatensystem gesetzt war.`;
-    else if (n.info.crsBeispiel) crs.title = `Das Beispielnetz nennt kein Koordinatensystem; es liegt in ${n.info.crsName}. Das Feld gilt für das nächste Netz.`;
+    box.append(chip(`${nr(n.info.links)} ${tx("Links", "links")}`));
+    const crs = chip(n.info.crs + (crsFest(n.info) ? "" : tx(" aus Formular", " from form")), crsFest(n.info) ? "fit" : "");
+    if (n.info.crsPlatzhalter) crs.title = tx(`Das Netz nennt „${n.info.crsPlatzhalter}“: MATSims Vorgabe, wenn beim Schreiben kein Koordinatensystem gesetzt war.`, `The network names “${n.info.crsPlatzhalter}”: MATSim's default when no coordinate system was set on writing.`);
+    else if (n.info.crsBeispiel) crs.title = tx(`Das Beispielnetz nennt kein Koordinatensystem; es liegt in ${n.info.crsName}. Das Feld gilt für das nächste Netz.`, `The example network names no coordinate system; it is in ${n.info.crsName}. The field applies to the next network.`);
     box.append(crs);
     const w = n.info.wege;
     if (w?.links) {
-      const c = chip(`OSM-Weg an ${de((100 * w.links) / n.info.links)} % der Links`);
-      c.title = w.sumo ? "Die Link-IDs sehen nach SUMO aus (Weg-ID#Abschnitt): Eine Zuordnung aus OSM lässt sich über den Weg übernehmen." : "Die Links tragen osm:way:id oder origid: Eine Zuordnung aus OSM lässt sich über den Weg übernehmen.";
+      const c = chip(tx(`OSM-Weg an ${nr((100 * w.links) / n.info.links)} % der Links`, `OSM way on ${nr((100 * w.links) / n.info.links)} % of links`));
+      c.title = w.sumo
+        ? tx("Die Link-IDs sehen nach SUMO aus (Weg-ID#Abschnitt): Eine Zuordnung aus OSM lässt sich über den Weg übernehmen.", "The link IDs look like SUMO (way ID#section): an assignment from OSM can be transferred via the way.")
+        : tx("Die Links tragen osm:way:id oder origid: Eine Zuordnung aus OSM lässt sich über den Weg übernehmen.", "The links carry osm:way:id or origid: an assignment from OSM can be transferred via the way.");
       box.append(c);
     }
   }
@@ -897,22 +930,28 @@ function renderQuelle(n) {
   geo.hidden = !n.info;
   $("geo-file").closest("label").hidden = Boolean(osm);
   if (osm) {
-    $("geo-text").innerHTML = 'Die Kanten folgen den Wegen aus OSM, geteilt an jedem Knotenpunkt, und heißen wie bei SUMO: <code>Weg-ID#Abschnitt</code>, die Gegenrichtung mit Minus. Eine <code>counts.xml</code> gibt es dafür nicht, aber eine Zuordnung, die sich auf ein MATSim-Netz übertragen lässt. Daten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap-Mitwirkende</a> (ODbL).';
+    $("geo-text").innerHTML = tx(
+      'Die Kanten folgen den Wegen aus OSM, geteilt an jedem Knotenpunkt, und heißen wie bei SUMO: <code>Weg-ID#Abschnitt</code>, die Gegenrichtung mit Minus. Eine <code>counts.xml</code> gibt es dafür nicht, aber eine Zuordnung, die sich auf ein MATSim-Netz übertragen lässt. Daten © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap-Mitwirkende</a> (ODbL).',
+      'The edges follow the OSM ways, split at every junction, and are named as in SUMO: <code>wayID#section</code>, the opposite direction with a minus. There is no <code>counts.xml</code> for them, but an assignment that can be transferred to a MATSim network. Data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> (ODbL).',
+    );
     $("geo-clear").hidden = true;
   } else if (n.info) {
     const g = n.info.geometrien;
     const s = n.info.stats;
     $("geo-text").innerHTML = g
-      ? `Link-Geometrien: <strong>${esc(n.geoName)}</strong>, ${de(s.fromCsv)} von ${de(n.info.links)} Links mit Verlauf.`
+      ? tx(`Link-Geometrien: <strong>${esc(n.geoName)}</strong>, ${nr(s.fromCsv)} von ${nr(n.info.links)} Links mit Verlauf.`, `Link geometries: <strong>${esc(n.geoName)}</strong>, ${nr(s.fromCsv)} of ${nr(n.info.links)} links with a shape.`)
       : s.fromOrigGeom
-        ? `Link-Geometrien aus <code>origgeom</code>: ${de(s.fromOrigGeom)} Links mit Verlauf.`
-        : "Ohne Link-Geometrien: Die Links laufen gerade von Knoten zu Knoten, die Abstände sind gröber.";
+        ? tx(`Link-Geometrien aus <code>origgeom</code>: ${nr(s.fromOrigGeom)} Links mit Verlauf.`, `Link geometries from <code>origgeom</code>: ${nr(s.fromOrigGeom)} links with a shape.`)
+        : tx("Ohne Link-Geometrien: Die Links laufen gerade von Knoten zu Knoten, die Abstände sind gröber.", "Without link geometries: links run straight from node to node, so distances are rougher.");
     $("geo-clear").hidden = !g;
   }
   const credit = $("credit");
   credit.hidden = !n.beispiel;
   if (n.beispiel) {
-    credit.innerHTML = `Beispielnetz: <a href="${BEISPIEL.seite}" target="_blank" rel="noopener"><code>examples/scenarios/berlin</code></a> aus matsim-libs, ein altes Netz der Hauptstraßen von 2006 in DHDN / Gauß-Krüger 4. Die Seite lädt es von GitHub. Neuere Netze mit Geometrien gibt es im VSP-SVN, etwa unter <code>berlin/</code>.`;
+    credit.innerHTML = tx(
+      `Beispielnetz: <a href="${BEISPIEL.seite}" target="_blank" rel="noopener"><code>examples/scenarios/berlin</code></a> aus matsim-libs, ein altes Netz der Hauptstraßen von 2006 in DHDN / Gauß-Krüger 4. Die Seite lädt es von GitHub. Neuere Netze mit Geometrien gibt es im VSP-SVN, etwa unter <code>berlin/</code>.`,
+      `Example network: <a href="${BEISPIEL.seite}" target="_blank" rel="noopener"><code>examples/scenarios/berlin</code></a> from matsim-libs, an old network of the main roads from 2006 in DHDN / Gauss-Krüger 4. The page loads it from GitHub. Newer networks with geometries are in the VSP SVN, e.g. under <code>berlin/</code>.`,
+    );
   }
 }
 
@@ -987,7 +1026,7 @@ async function openFolder(url) {
   const t = ++svn.token;
   const li = document.createElement("li");
   li.className = "empty";
-  li.textContent = "Ordner laden …";
+  li.textContent = tx("Ordner laden …", "Loading folder …");
   $("svn-list").replaceChildren(li);
   svnNote(null);
   try {
@@ -1000,7 +1039,7 @@ async function openFolder(url) {
     if (t !== svn.token) return;
     Object.assign(svn, { url, entries: [] });
     renderSvn();
-    svnNote(`Der Ordner ließ sich nicht laden (${reason(err)}).`);
+    svnNote(tx(`Der Ordner ließ sich nicht laden (${reason(err)}).`, `The folder could not be loaded (${reason(err)}).`));
   }
 }
 
@@ -1036,10 +1075,10 @@ function renderSvn() {
     n.className = "n";
     n.textContent = e.dir && e.name !== ".." ? `${e.name}/` : e.name;
     b.append(n);
-    if (kind === "netz") b.append(chip("Netz"));
+    if (kind === "netz") b.append(chip(tx("Netz", "Network")));
     if (kind === "geometrien") {
-      b.append(chip("Geometrien"));
-      if (state.netz && stemFit(state.netz.name, e.name)) b.append(chip("passt zum Netz", "fit"));
+      b.append(chip(tx("Geometrien", "Geometries")));
+      if (state.netz && stemFit(state.netz.name, e.name)) b.append(chip(tx("passt zum Netz", "fits the network"), "fit"));
     }
     li.append(b);
     return li;
@@ -1054,12 +1093,12 @@ function renderSvn() {
   if (!items.length) {
     const li = document.createElement("li");
     li.className = "empty";
-    li.textContent = "Leer";
+    li.textContent = tx("Leer", "Empty");
     items.push(li);
   }
   $("svn-list").replaceChildren(...items);
   $("svn-list").scrollTop = 0;
-  svnNote([svn.hint, hidden ? `${de(hidden)} weitere Datei${hidden === 1 ? "" : "en"} ausgeblendet.` : null].filter(Boolean).join(" ") || null);
+  svnNote([svn.hint, hidden ? tx(`${nr(hidden)} weitere Datei${hidden === 1 ? "" : "en"} ausgeblendet.`, `${nr(hidden)} more file${hidden === 1 ? "" : "s"} hidden.`) : null].filter(Boolean).join(" ") || null);
 }
 
 $("svn").addEventListener("toggle", () => {
@@ -1075,7 +1114,7 @@ $("svn-list").addEventListener("click", async (e) => {
   const { url, kind } = b.dataset;
   if (kind === "dir") return openFolder(url);
   if (kind === "geometrien") {
-    if (!state.netz?.url) return svnNote("Link-Geometrien gehören zu einem Netz aus dem SVN. Wähle zuerst das Netz.");
+    if (!state.netz?.url) return svnNote(tx("Link-Geometrien gehören zu einem Netz aus dem SVN. Wähle zuerst das Netz.", "Link geometries belong to a network from the SVN. Choose the network first."));
     return ladeNetzVonUrl({ net: state.netz.url, geo: url });
   }
   ladeNetzVonUrl({ net: url, geo: "auto" });
@@ -1088,13 +1127,13 @@ $("svn-url-form").addEventListener("submit", (e) => {
   try {
     url = new URL(value, svn.url ?? SVN_ROOT).href;
   } catch {
-    return svnNote("Das ist kein gültiger Pfad und keine gültige Adresse.");
+    return svnNote(tx("Das ist kein gültiger Pfad und keine gültige Adresse.", "That is neither a valid path nor a valid address."));
   }
   if (url.endsWith("/")) openFolder(url);
   else ladeNetzVonUrl({ net: url, geo: "auto" });
 });
 
-// ---------- Adresszeile: ?net=…&geo=…&crs=…&daten=… ----------
+// ---------- Adresszeile: ?net=…&geo=…&crs=…&daten=…&lang=de ----------
 function relativeTo(folder, url) {
   if (url.startsWith(folder)) return url.slice(folder.length);
   const a = new URL(folder);
@@ -1116,6 +1155,8 @@ function updateLink() {
     if (!n.info?.crsAusDatei) p.set("crs", n.info?.crs ?? $("crs").value.trim());
   }
   if (DATEN !== STANDARD_DATEN) p.set("daten", DATEN);
+  // die Sprache nur, wenn sie nicht die Vorgabe ist: so öffnet ein geteilter Link in derselben
+  if (sprache() !== SPRACHE_VORGABE) p.set("lang", sprache());
   if (params.has("debug")) p.set("debug", "");
   const q = p.toString().replace(/%2F/g, "/").replace(/%3A/g, ":");
   history.replaceState(null, "", q ? `?${q}` : location.pathname);
@@ -1132,8 +1173,8 @@ async function ladeDaten() {
     if (state.netz) await waehleStellen();
   } catch (err) {
     state.datenFehler = err;
-    $("daten-text").textContent = `Die Dauerzählstellen der Zählkarte ließen sich nicht laden (${reason(err)}). Adresse: ${DATEN}dauer/index.json`;
-    if (state.netz) setStatus("Ohne die Daten der Zählkarte gibt es nichts zuzuordnen.", "error");
+    renderDatenText();
+    if (state.netz) setStatus(() => tx("Ohne die Daten der Zählkarte gibt es nichts zuzuordnen.", "Without the Zählkarte data there is nothing to assign."), "error");
   }
 }
 
@@ -1143,17 +1184,34 @@ async function ladeDaten() {
  */
 function renderDatenText() {
   const d = state.daten;
-  if (!d) return;
-  const stand = `Zählkarte vom ${esc(deDatum(d.erzeugt))}`;
-  const alle = `${de(d.stellen.length)} Dauerzählstellen aus ${de(d.quellen.size)} Quellen`;
+  if (!d) {
+    const err = state.datenFehler;
+    if (err) $("daten-text").textContent = tx(`Die Dauerzählstellen der Zählkarte ließen sich nicht laden (${reason(err)}). Adresse: ${DATEN}dauer/index.json`, `The permanent counters of the Zählkarte could not be loaded (${reason(err)}). Address: ${DATEN}dauer/index.json`);
+    else $("daten-text").textContent = tx("Die Dauerzählstellen der Zählkarte werden geladen …", "Loading the permanent counters of the Zählkarte …");
+    return;
+  }
   const b = state.bereich;
-  const wo = state.gebiet ? "Im gewählten Gebiet" : "Im Gebiet des Netzes";
-  const klammer = state.gebiet && b ? `im ganzen Netz ${de(b.imNetz)}, in ganz Deutschland ${de(d.stellen.length)}` : `in ganz Deutschland ${de(d.stellen.length)} aus ${de(d.quellen.size)}`;
+  const g = state.gebiet;
   let text;
-  if (!b) text = `${stand}: ${alle} in ganz Deutschland. Mit einem Netz zählen nur die in seinem Gebiet.`;
-  else if (!b.imGebiet) text = `${stand}: ${wo} liegen keine Dauerzählstellen (${state.gebiet ? klammer : `in ganz Deutschland ${alle}`}).`;
-  else text = `${stand}: ${wo} liegen ${anzahl(b.imGebiet, "Dauerzählstelle", "Dauerzählstellen")} aus ${anzahl(b.quellen, "Quelle", "Quellen")} (${klammer}).`;
-  if (d.version !== VERTRAG) text += ` <strong>Achtung:</strong> Die Daten haben Version ${esc(d.version)}, gebaut ist die Seite für Version ${VERTRAG}.`;
+  if (sprache() === "de") {
+    const stand = `Zählkarte vom ${esc(datumAnzeige(d.erzeugt))}`;
+    const alle = `${nr(d.stellen.length)} Dauerzählstellen aus ${nr(d.quellen.size)} Quellen`;
+    const wo = g ? "Im gewählten Gebiet" : "Im Gebiet des Netzes";
+    const klammer = g && b ? `im ganzen Netz ${nr(b.imNetz)}, in ganz Deutschland ${nr(d.stellen.length)}` : `in ganz Deutschland ${nr(d.stellen.length)} aus ${nr(d.quellen.size)}`;
+    if (!b) text = `${stand}: ${alle} in ganz Deutschland. Mit einem Netz zählen nur die in seinem Gebiet.`;
+    else if (!b.imGebiet) text = `${stand}: ${wo} liegen keine Dauerzählstellen (${g ? klammer : `in ganz Deutschland ${alle}`}).`;
+    else text = `${stand}: ${wo} liegen ${anzahl(b.imGebiet, "Dauerzählstelle", "Dauerzählstellen")} aus ${anzahl(b.quellen, "Quelle", "Quellen")} (${klammer}).`;
+    if (d.version !== VERTRAG) text += ` <strong>Achtung:</strong> Die Daten haben Version ${esc(d.version)}, gebaut ist die Seite für Version ${VERTRAG}.`;
+  } else {
+    const stand = `Zählkarte of ${esc(datumAnzeige(d.erzeugt))}`;
+    const alle = `${nr(d.stellen.length)} permanent counters from ${nr(d.quellen.size)} sources`;
+    const wo = g ? "In the chosen area" : "In the network area";
+    const klammer = g && b ? `${nr(b.imNetz)} in the whole network, ${nr(d.stellen.length)} in all of Germany` : `${nr(d.stellen.length)} from ${anzahl(d.quellen.size, "source", "sources")} in all of Germany`;
+    if (!b) text = `${stand}: ${alle} in all of Germany. With a network, only those in its area count.`;
+    else if (!b.imGebiet) text = `${stand}: ${wo} there are no permanent counters (${g ? klammer : `${alle} in all of Germany`}).`;
+    else text = `${stand}: ${wo} there ${b.imGebiet === 1 ? "is" : "are"} ${anzahl(b.imGebiet, "permanent counter", "permanent counters")} from ${anzahl(b.quellen, "source", "sources")} (${klammer}).`;
+    if (d.version !== VERTRAG) text += ` <strong>Note:</strong> The data have version ${esc(d.version)}; the page is built for version ${VERTRAG}.`;
+  }
   $("daten-text").innerHTML = text;
 }
 
@@ -1170,9 +1228,9 @@ function ladeKurz() {
   if (k.manifest && k.stellen) return Promise.resolve(true);
   k.laedt ??= (async () => {
     try {
-      setStatus("Kurzzeitzählungen der Zählkarte laden …");
+      setStatus(tx("Kurzzeitzählungen der Zählkarte laden …", "Loading the short-term counts of the Zählkarte …"));
       k.manifest = leseManifest(await holeJson("manifest.json"));
-      if (!k.manifest.muster) throw new Error("Diese Daten der Zählkarte enthalten noch keine Werte je Strom (stroeme/, ab zaehlkarte#45)");
+      if (!k.manifest.muster) throw new Error(tx("Diese Daten der Zählkarte enthalten noch keine Werte je Strom (stroeme/, ab zaehlkarte#45)", "These Zählkarte data contain no values per movement yet (stroeme/, from zaehlkarte#45)"));
       k.stellen = leseStellen(await holeJson(k.manifest.index));
       k.fehler = null;
       return true;
@@ -1259,7 +1317,7 @@ async function kurzStellen([w, s, o, n]) {
       fehlerJahre++;
     }
     fertig++;
-    setStatus(`Kurzzeitzählungen laden … ${de(fertig)} von ${de(dateien.length)} Jahren`, "busy", (100 * fertig) / Math.max(1, dateien.length));
+    setStatus(tx(`Kurzzeitzählungen laden … ${nr(fertig)} von ${nr(dateien.length)} Jahren`, `Loading short-term counts … ${nr(fertig)} of ${nr(dateien.length)} years`), "busy", (100 * fertig) / Math.max(1, dateien.length));
   }));
   // erst die Lieferungen, dann je Stelle die jüngste: Ist die jüngste aus einer abgewählten, gilt die davor
   const aus = new Map();
@@ -1267,7 +1325,7 @@ async function kurzStellen([w, s, o, n]) {
     if (!imGebiet.has(e.z.stelle)) return false;
     const l = lieferungVon(e.quelle, e.z.lieferung);
     if (l && lieferungAn(e.quelle, l)) return true;
-    const key = l ? `${l.lizenz} (${l.titel ?? l.code})` : "ohne Lieferung";
+    const key = l ? `${l.lizenz} (${l.titel ?? l.code})` : ""; // "": ohne Lieferung
     aus.set(key, (aus.get(key) ?? 0) + 1);
     return false;
   });
@@ -1296,18 +1354,32 @@ async function kurzStellen([w, s, o, n]) {
   return out;
 }
 
-const WOCHENTAG_KURZ = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+const WOCHENTAG_KURZ = { de: ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"], en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] };
 const datumText = (iso) => {
   if (!iso) return "";
   const [j, m, t] = iso.split("-");
-  return `${WOCHENTAG_KURZ[wochentag(tagNr(iso))]} ${t}.${m}.${j}`;
+  const wt = WOCHENTAG_KURZ[sprache()][wochentag(tagNr(iso))];
+  return sprache() === "de" ? `${wt} ${t}.${m}.${j}` : `${wt} ${j}-${m}-${t}`;
 };
-const armText = (arm) => `Arm ${arm.nr}${arm.name ? ` „${arm.name}“` : ""}`;
+// Arm, Abschnitt und Richtung eines Kurzzeit-Punkts. Die Stelle trägt sie auf Deutsch (sp = "de"),
+// wie sie in die Ausgaben gehen; die Oberfläche fragt in ihrer Sprache (abschnittText & Co.).
+const armText = (arm, sp = sprache()) => `${sp === "de" ? "Arm" : "arm"} ${arm.nr}${arm.name ? (sp === "de" ? ` „${arm.name}“` : ` “${arm.name}”`) : ""}`;
+function kurzAbschnitt(p, sp = sprache()) {
+  if (p.art === "knoten") return sp === "de" ? `${p.seite === "zu" ? "Zufahrt" : "Ausfahrt"} Arm ${p.arm.nr}` : `${p.seite === "zu" ? "Approach" : "Exit"}, arm ${p.arm.nr}`;
+  return sp === "de" ? `Richtung Arm ${p.arm.nr}` : `Towards arm ${p.arm.nr}`;
+}
+function kurzRichtung(p, sp = sprache()) {
+  if (p.art === "knoten") return sp === "de" ? `${p.seite === "zu" ? "Zufahrt aus" : "Ausfahrt in"} ${armText(p.arm, sp)}` : `${p.seite === "zu" ? "Approach from" : "Exit into"} ${armText(p.arm, sp)}`;
+  const von = p.vonArme.length === 1 ? (sp === "de" ? ` (von ${armText(p.vonArme[0], sp)})` : ` (from ${armText(p.vonArme[0], sp)})`) : "";
+  return `${sp === "de" ? "Richtung" : "Towards"} ${armText(p.arm, sp)}${von}`;
+}
+const abschnittText = (s) => (familieVon(s) === "kurz" ? kurzAbschnitt(s.kurz) : s.abschnitt);
+const richtungAnzeige = (s) => (familieVon(s) === "kurz" ? kurzRichtung(s.kurz) : s.richtungText);
+const zielText = (s) => (familieVon(s) === "kurz" && s.r.ziel != null ? armText(s.kurz.arm) : s.r.ziel);
 
 /** Ein Punkt aus lib/kurzzeit.js als Stelle der Liste, der Karte und der Zuordnung. */
 function kurzStelle(p, liz) {
   const knoten = p.art === "knoten";
-  const seite = knoten ? (p.seite === "zu" ? "Zufahrt" : "Ausfahrt") : "Richtung";
   const gruppen = KURZ_GRUPPEN.filter((g) => p.werte[g]);
   const modi = [...new Set(gruppen.flatMap((g) => state.gruppen[g].link.split(/[,\s]+/).map((m) => m.trim().toLowerCase()).filter(Boolean)))];
   return {
@@ -1315,9 +1387,9 @@ function kurzStelle(p, liz) {
     familie: "kurz",
     quelle: p.quelle,
     name: p.name,
-    abschnitt: knoten ? `${seite} Arm ${p.arm.nr}` : `Richtung Arm ${p.arm.nr}`,
-    richtungText: knoten ? `${seite} ${p.seite === "zu" ? "aus" : "in"} ${armText(p.arm)}` : `Richtung ${armText(p.arm)}${p.vonArme.length === 1 ? ` (von ${armText(p.vonArme[0])})` : ""}`,
-    r: { art: "gerichtet", grad: p.grad, ziel: p.grad == null ? armText(p.arm) : null },
+    abschnitt: kurzAbschnitt(p, "de"),
+    richtungText: kurzRichtung(p, "de"),
+    r: { art: "gerichtet", grad: p.grad, ziel: p.grad == null ? armText(p.arm, "de") : null },
     lon: p.lon,
     lat: p.lat,
     gruppen,
@@ -1356,7 +1428,7 @@ function renderKurz() {
     const b = document.createElement("button");
     b.type = "button";
     b.value = String(w.nr);
-    b.textContent = w.kurz;
+    b.textContent = tx(w.kurz, w.en);
     b.setAttribute("aria-pressed", String(o.wochentage.includes(w.nr)));
     return b;
   }));
@@ -1369,14 +1441,13 @@ function renderKurz() {
   $("kurz-lieferungen").replaceChildren(...lieferungen.map(([q, l]) => {
     const el = document.createElement("label");
     el.className = "check";
-    el.innerHTML = `<input type="checkbox" class="kurz-lieferung" value="${esc(`${q.code}:${l.code}`)}"${lieferungAn(q.code, l) ? " checked" : ""}><span>${esc(q.name)}: ${esc(l.titel ?? l.code)} <small class="hint">· ${esc(l.lizenz)}${WEITERGABE.test(l.lizenz) ? ", Weitergabe unter gleichen Bedingungen" : ""}</small></span>`;
+    el.innerHTML = `<input type="checkbox" class="kurz-lieferung" value="${esc(`${q.code}:${l.code}`)}"${lieferungAn(q.code, l) ? " checked" : ""}><span>${esc(q.name)}: ${esc(l.titel ?? l.code)} <small class="hint">· ${esc(l.lizenz)}${WEITERGABE.test(l.lizenz) ? tx(", Weitergabe unter gleichen Bedingungen", ", share-alike") : ""}</small></span>`;
     return el;
   }));
-  const namen = k.manifest?.gruppenNamen ?? { kfz: "Kfz", sv: "Schwerverkehr", rad: "Rad", fuss: "Fuß" };
   $("kurz-gruppen").replaceChildren(...KURZ_GRUPPEN.map((g) => {
     const l = document.createElement("label");
     l.className = "check";
-    l.innerHTML = `<input type="checkbox" class="kurz-gruppe" value="${g}"${o.gruppen.includes(g) ? " checked" : ""}>${esc(namen[g] ?? g)} <small class="hint">→ ${esc(state.gruppen[g].mode)}</small>`;
+    l.innerHTML = `<input type="checkbox" class="kurz-gruppe" value="${g}"${o.gruppen.includes(g) ? " checked" : ""}>${esc(gruppenName(g, k.manifest?.gruppenNamen))} <small class="hint">→ ${esc(state.gruppen[g].mode)}</small>`;
     return l;
   }));
   renderKurzStats();
@@ -1391,23 +1462,27 @@ function renderKurzStats() {
   const t = $("kurz-text");
   const i = k.info;
   if (!k.an || !i) {
-    sum.textContent = k.an ? "an" : "aus";
+    sum.textContent = k.an ? tx("an", "on") : tx("aus", "off");
     t.innerHTML = KURZ_TEXT;
     return;
   }
   if (i.fehler) {
-    sum.textContent = "nicht verfügbar";
-    t.innerHTML = `Die Kurzzeitzählungen ließen sich nicht laden (${esc(reason(i.fehler))}). Adresse: <code>${esc(DATEN)}manifest.json</code>`;
+    sum.textContent = tx("nicht verfügbar", "not available");
+    t.innerHTML = tx(`Die Kurzzeitzählungen ließen sich nicht laden (${esc(reason(i.fehler))}). Adresse: <code>${esc(DATEN)}manifest.json</code>`, `The short-term counts could not be loaded (${esc(reason(i.fehler))}). Address: <code>${esc(DATEN)}manifest.json</code>`);
     return;
   }
   const mitLink = state.stellen.filter((s) => familieVon(s) === "kurz" && linkVon(s)).length;
-  sum.textContent = `${de(i.punkte)} Punkte`;
-  const teile = [`Zählkarte vom ${esc(deDatum(k.manifest.erzeugt))}: ${state.gebiet ? "Im gewählten Gebiet" : "Im Gebiet des Netzes"} liegen ${de(i.gebiet)} Stellen mit Kurzzeitzählungen; ${de(i.stellen.size)} davon haben eine passende Zählung (${anzahl(i.knoten.size, "Knoten", "Knoten")}, ${anzahl(i.querschnitte.size, "Querschnitt", "Querschnitte")}). Das ergibt ${de(i.punkte)} Punkte${state.netz && state.ergebnisse.size ? `, ${de(mitLink)} mit Link` : ""}.`];
-  if (i.ohneWinkel) teile.push(`${de(i.ohneWinkel)} Zu- oder Ausfahrten an Armen ohne Winkel bleiben draußen.`);
-  if (i.ohneRichtung) teile.push(`${de(i.ohneRichtung)} Fahrtrichtungen an Querschnitten ohne Winkel sind zum Prüfen markiert.`);
-  if (i.ohneLizenz) teile.push(`${de(i.ohneLizenz)} Punkte aus Lieferungen ohne Lizenz bleiben draußen.`);
-  for (const [was, n] of i.ausLieferung ?? []) teile.push(`${de(n)} Zählungen unter ${esc(was)} sind abgewählt.`);
-  if (i.fehlerJahre) teile.push(`<strong>${de(i.fehlerJahre)} von ${de(i.dateien)} Jahren ließen sich nicht laden.</strong>`);
+  sum.textContent = tx(`${nr(i.punkte)} Punkte`, `${nr(i.punkte)} points`);
+  const mitLinkText = state.netz && state.ergebnisse.size ? tx(`, ${nr(mitLink)} mit Link`, `, ${nr(mitLink)} with a link`) : "";
+  const teile = [tx(
+    `Zählkarte vom ${esc(datumAnzeige(k.manifest.erzeugt))}: ${state.gebiet ? "Im gewählten Gebiet" : "Im Gebiet des Netzes"} liegen ${nr(i.gebiet)} Stellen mit Kurzzeitzählungen; ${nr(i.stellen.size)} davon haben eine passende Zählung (${anzahl(i.knoten.size, "Knoten", "Knoten")}, ${anzahl(i.querschnitte.size, "Querschnitt", "Querschnitte")}). Das ergibt ${nr(i.punkte)} Punkte${mitLinkText}.`,
+    `Zählkarte of ${esc(datumAnzeige(k.manifest.erzeugt))}: ${state.gebiet ? "In the chosen area" : "In the network area"} there are ${nr(i.gebiet)} sites with short-term counts; ${nr(i.stellen.size)} of them have a matching count (${anzahl(i.knoten.size, "junction", "junctions")}, ${anzahl(i.querschnitte.size, "cross-section", "cross-sections")}). That makes ${nr(i.punkte)} points${mitLinkText}.`,
+  )];
+  if (i.ohneWinkel) teile.push(tx(`${nr(i.ohneWinkel)} Zu- oder Ausfahrten an Armen ohne Winkel bleiben draußen.`, `${nr(i.ohneWinkel)} approaches or exits on arms without an angle are left out.`));
+  if (i.ohneRichtung) teile.push(tx(`${nr(i.ohneRichtung)} Fahrtrichtungen an Querschnitten ohne Winkel sind zum Prüfen markiert.`, `${nr(i.ohneRichtung)} directions at cross-sections without an angle are marked for review.`));
+  if (i.ohneLizenz) teile.push(tx(`${nr(i.ohneLizenz)} Punkte aus Lieferungen ohne Lizenz bleiben draußen.`, `${nr(i.ohneLizenz)} points from deliveries without a licence are left out.`));
+  for (const [was, n] of i.ausLieferung ?? []) teile.push(tx(`${nr(n)} Zählungen unter ${esc(was || "ohne Lieferung")} sind abgewählt.`, `${nr(n)} counts under ${esc(was || "no delivery")} are deselected.`));
+  if (i.fehlerJahre) teile.push(tx(`<strong>${nr(i.fehlerJahre)} von ${nr(i.dateien)} Jahren ließen sich nicht laden.</strong>`, `<strong>${nr(i.fehlerJahre)} of ${nr(i.dateien)} years could not be loaded.</strong>`));
   t.innerHTML = teile.join(" ");
 }
 
@@ -1459,9 +1534,9 @@ $("kurz-felder").addEventListener("change", (e) => {
 $("kurz-wochentage").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  const nr = Number(b.value);
+  const tag = Number(b.value);
   const w = state.kurz.opts.wochentage;
-  state.kurz.opts.wochentage = w.includes(nr) ? w.filter((x) => x !== nr) : [...w, nr];
+  state.kurz.opts.wochentage = w.includes(tag) ? w.filter((x) => x !== tag) : [...w, tag];
   if (state.kurz.an) kurzGeaendert();
   else {
     kurzSpeichern();
@@ -1478,9 +1553,9 @@ async function waehleStellen() {
   renderCrsVorschlag();
   if (!d || !n?.info?.bbox) {
     if (n && !d) {
-      if (state.datenFehler) setStatus("Netz geladen, aber ohne die Daten der Zählkarte gibt es nichts zuzuordnen (siehe Schritt 2).", "error");
-      else setStatus("Netz geladen. Die Zählstellen kommen gleich …", "busy");
-    } else if (n && !n.info?.bbox) setStatus("Das Netz hat keine Links, die sich zeichnen lassen.", "error");
+      if (state.datenFehler) setStatus(() => tx("Netz geladen, aber ohne die Daten der Zählkarte gibt es nichts zuzuordnen (siehe Schritt 2).", "Network loaded, but without the Zählkarte data there is nothing to assign (see step 2)."), "error");
+      else setStatus(tx("Netz geladen. Die Zählstellen kommen gleich …", "Network loaded. The count sites are coming …"), "busy");
+    } else if (n && !n.info?.bbox) setStatus(() => tx("Das Netz hat keine Links, die sich zeichnen lassen.", "The network has no links that can be drawn."), "error");
     return;
   }
   const imNetz = imKasten(d.stellen, n.info.bbox);
@@ -1549,10 +1624,10 @@ async function suche() {
   if (!stellen.length) {
     state.ergebnisse.clear();
     nachSuche();
-    setStatus(`${state.gebiet ? "Im gewählten Gebiet" : "Im Gebiet des Netzes"} liegen keine passenden Zählstellen.`, "idle");
+    setStatus(() => tx(`${state.gebiet ? "Im gewählten Gebiet" : "Im Gebiet des Netzes"} liegen keine passenden Zählstellen.`, `There are no matching count sites ${state.gebiet ? "in the chosen area" : "in the network area"}.`), "idle");
     return;
   }
-  setStatus(`Links zu ${de(stellen.length)} Zählstellen suchen …`);
+  setStatus(tx(`Links zu ${nr(stellen.length)} Zählstellen suchen …`, `Searching links for ${nr(stellen.length)} count sites …`));
   try {
     const r = await frage({ type: "suche", stellen, params: { radius: Number($("radius").value) || 50, maxWinkel: Number($("winkel").value) || 60 } });
     if (t !== state.suchToken) return;
@@ -1561,7 +1636,7 @@ async function suche() {
     nachSuche();
   } catch (err) {
     if (t !== state.suchToken) return;
-    setStatus(`Die Suche nach Links ging schief: ${err.message}`, "error");
+    setStatus(tx(`Die Suche nach Links ging schief: ${err.message}`, `The link search failed: ${err.message}`), "error");
   }
 }
 
@@ -1575,8 +1650,15 @@ function nachSuche() {
   const kurze = state.stellen.filter((s) => familieVon(s) === "kurz").length;
   const quer = state.stellen.filter((s) => familieVon(s) === "quer").length;
   const dauer = state.stellen.length - kurze - quer;
-  const wer = kurze ? `${de(dauer)} Dauerzählstellen und ${de(kurze)} Kurzzeit-Punkte` : `${de(dauer)} Zählstellen`;
-  setStatus(`${wer}, ${de(mit)} davon mit Link. ${zaehle("pruefen") ? `${de(zaehle("pruefen"))} zum Prüfen.` : ""}${quer ? ` ${de(quer)} ohne Richtung nur angezeigt.` : ""}`.trim(), "done");
+  const pruefen = zaehle("pruefen");
+  setStatus(() => {
+    if (sprache() === "de") {
+      const wer = kurze ? `${nr(dauer)} Dauerzählstellen und ${nr(kurze)} Kurzzeit-Punkte` : `${nr(dauer)} Zählstellen`;
+      return `${wer}, ${nr(mit)} davon mit Link. ${pruefen ? `${nr(pruefen)} zum Prüfen.` : ""}${quer ? ` ${nr(quer)} ohne Richtung nur angezeigt.` : ""}`.trim();
+    }
+    const wer = kurze ? `${nr(dauer)} permanent counters and ${nr(kurze)} short-term points` : `${anzahl(dauer, "count site", "count sites")}`;
+    return `${wer}, ${nr(mit)} of them with a link. ${pruefen ? `${nr(pruefen)} to review.` : ""}${quer ? ` ${nr(quer)} without direction, shown only.` : ""}`.trim();
+  }, "done");
   renderAuswahl();
   renderMittelRahmen();
   mittleAlle();
@@ -1635,7 +1717,7 @@ function inhaberVon(linkId, s) {
   const modi = ausgabeModi(s);
   return (state.inhaber?.get(linkId) ?? []).filter((t) => t.id !== s.id && (familieVon(s) === "kurz" || familieVon(t) === "dauer") && ausgabeModi(t).some((m) => modi.includes(m)));
 }
-const stelleText = (t) => (familieVon(t) === "kurz" ? `${t.name || t.kurz.stelle} (${t.abschnitt}, ${t.kurz.stelle})` : `${t.name || t.id} (${t.id})`);
+const stelleText = (t) => (familieVon(t) === "kurz" ? `${t.name || t.kurz.stelle} (${abschnittText(t)}, ${t.kurz.stelle})` : `${t.name || t.id} (${t.id})`);
 
 /** Die Inhaber eines Links als Text; Dauerzählstellen beim Namen, weil sie vor Kurzzeit-Punkten gehen. */
 function inhaberText(linkId, s) {
@@ -1643,7 +1725,7 @@ function inhaberText(linkId, s) {
   const dauer = andere.filter((t) => familieVon(t) === "dauer");
   const kurze = andere.filter((t) => familieVon(t) === "kurz");
   const teile = [];
-  if (familieVon(s) === "kurz" && dauer.length) teile.push(`die Dauerzählstelle ${dauer.map(stelleText).join(", ")}, die vorgeht`);
+  if (familieVon(s) === "kurz" && dauer.length) teile.push(tx(`die Dauerzählstelle ${dauer.map(stelleText).join(", ")}, die vorgeht`, `the permanent counter ${dauer.map(stelleText).join(", ")}, which takes precedence`));
   else if (dauer.length) teile.push(dauer.map(stelleText).join(", "));
   if (kurze.length) teile.push(kurze.map(stelleText).join(", "));
   return teile.join("; ");
@@ -1668,33 +1750,36 @@ function gruendeVon(s) {
   const k = state.ergebnisse.get(s.id)?.kandidaten ?? [];
   if (!w) {
     const e = state.entscheid.get(s.id);
-    const vorab = e?.anker && !e.link ? [`Aus „${e.anker.netz ?? "einer Zuordnung"}“ nicht eindeutig übernommen (${e.anker.grund ?? "unklar"}).`] : [];
-    if (vorab.length && !k.length) return [...vorab, "Im Umkreis des übernommenen Punkts liegt kein passender Link."];
+    const vorab = e?.anker && !e.link ? [tx(`Aus „${e.anker.netz ?? "einer Zuordnung"}“ nicht eindeutig übernommen (${e.anker.grund ?? "unklar"}).`, `Not uniquely transferred from “${e.anker.netz ?? "an assignment"}” (${e.anker.grund ?? "unclear"}).`)] : [];
+    if (vorab.length && !k.length) return [...vorab, tx("Im Umkreis des übernommenen Punkts liegt kein passender Link.", "There is no matching link around the transferred point.")];
     if (k.length) {
       const an = inhaberText(k[0].id, s);
-      return [...vorab, `Alle passenden Links im Umkreis sind an andere Stellen mit demselben Verkehrsmittel vergeben${an ? `, der nächste an ${an}` : ""}.`];
+      return [...vorab, tx(`Alle passenden Links im Umkreis sind an andere Stellen mit demselben Verkehrsmittel vergeben${an ? `, der nächste an ${an}` : ""}.`, `All matching links in the radius are taken by other sites with the same mode${an ? `, the nearest by ${an}` : ""}.`)];
     }
     const u = state.ergebnisse.get(s.id)?.umkreis;
     const r = umkreisVon(s);
-    const arm = familieVon(s) === "kurz" && s.kurz.art === "knoten" ? ` um den Punkt auf dem Arm (${de(state.kurz.opts.abstand)} m vom Knoten; gesucht wird bis kurz vor den Knoten, damit der Punkt nicht auf einen anderen Arm fällt)` : "";
-    if (!u?.links) return [...vorab, `Im Umkreis von ${de(r)} m${arm} liegt kein Link.${familieVon(s) === "kurz" ? " Hat das Netz diese Straße?" : ""}`];
-    if (!u.modus) return [...vorab, `Im Umkreis liegen ${de(u.links)} Links, aber keiner erlaubt ${s.modi.join(" oder ")}. Hat das Netz dieses Verkehrsmittel? Sonst unter „Link erlaubt“ anpassen.`];
-    return [...vorab, `Im Umkreis${arm} liegen ${de(u.modus)} Links mit ${s.modi.join(" oder ")}, aber keiner weicht höchstens ${de(Number($("winkel").value) || 60)}° von der Fahrtrichtung ab.`];
+    const amArm = familieVon(s) === "kurz" && s.kurz.art === "knoten";
+    const arm = amArm ? tx(` um den Punkt auf dem Arm (${nr(state.kurz.opts.abstand)} m vom Knoten; gesucht wird bis kurz vor den Knoten, damit der Punkt nicht auf einen anderen Arm fällt)`, ` around the point on the arm (${nr(state.kurz.opts.abstand)} m from the junction; the search stops just short of the junction so that the point does not fall onto another arm)`) : "";
+    const oder = tx(" oder ", " or ");
+    if (!u?.links) return [...vorab, tx(`Im Umkreis von ${nr(r)} m${arm} liegt kein Link.${familieVon(s) === "kurz" ? " Hat das Netz diese Straße?" : ""}`, `There is no link within ${nr(r)} m${arm}.${familieVon(s) === "kurz" ? " Does the network have this road?" : ""}`)];
+    if (!u.modus) return [...vorab, tx(`Im Umkreis liegen ${nr(u.links)} Links, aber keiner erlaubt ${s.modi.join(oder)}. Hat das Netz dieses Verkehrsmittel? Sonst unter „Link erlaubt“ anpassen.`, `There are ${nr(u.links)} links in the radius, but none allows ${s.modi.join(oder)}. Does the network have this mode? Otherwise adjust “Link allows”.`)];
+    return [...vorab, tx(`Im Umkreis${arm} liegen ${nr(u.modus)} Links mit ${s.modi.join(oder)}, aber keiner weicht höchstens ${nr(Number($("winkel").value) || 60)}° von der Fahrtrichtung ab.`, `There are ${nr(u.modus)} links with ${s.modi.join(oder)} in the radius${arm}, but none is within ${nr(Number($("winkel").value) || 60)}° of the direction of travel.`)];
   }
   const out = [];
   const e = state.entscheid.get(s.id);
-  if (e?.anker && !e.link) out.push(`Aus „${e.anker.netz ?? "einer Zuordnung"}“ nicht eindeutig übernommen (${e.anker.grund ?? "unklar"}). Gesucht wird vom übernommenen Punkt aus.`);
+  if (e?.anker && !e.link) out.push(tx(`Aus „${e.anker.netz ?? "einer Zuordnung"}“ nicht eindeutig übernommen (${e.anker.grund ?? "unklar"}). Gesucht wird vom übernommenen Punkt aus.`, `Not uniquely transferred from “${e.anker.netz ?? "an assignment"}” (${e.anker.grund ?? "unclear"}). The search starts from the transferred point.`));
   if (s.r.grad == null && !e?.anker) {
     out.push(familieVon(s) === "kurz"
-      ? `Die Zählung nennt für ${s.r.ziel} keinen Winkel: Hin- oder Rückrichtung prüfen.`
-      : `Die Quelle nennt nur das Ziel („${s.r.ziel}“), keine Himmelsrichtung: Hin- oder Rückrichtung prüfen.`);
+      ? tx(`Die Zählung nennt für ${zielText(s)} keinen Winkel: Hin- oder Rückrichtung prüfen.`, `The count gives no angle for ${zielText(s)}: check which of the two directions it is.`)
+      : tx(`Die Quelle nennt nur das Ziel („${s.r.ziel}“), keine Himmelsrichtung: Hin- oder Rückrichtung prüfen.`, `The source only names the destination (“${s.r.ziel}”), no compass direction: check which of the two directions it is.`));
   }
-  if (w.d > WEIT_M) out.push(`Der Link liegt ${de(w.d)} m ${e?.anker ? "vom übernommenen Punkt" : familieVon(s) === "kurz" && s.kurz.art === "knoten" ? "vom Punkt auf dem Arm" : "von der Stelle"} entfernt.`);
-  if (w.weit) out.push(`Kein Link liegt innerhalb von ${de(Number($("winkel").value) || 60)}° der genannten Richtung (${kurz(s.r.grad)}). Dieser weicht ${de(w.abweichung)}° ab, liegt aber näher an ihr als seine Gegenrichtung – die Quelle nennt wohl nur eine grobe Himmelsrichtung.`);
-  else if (w.abweichung != null && w.abweichung > WINKEL_PRUEFEN) out.push(`Die Richtung des Links weicht um ${de(w.abweichung)}° ab.`);
+  const wovon = e?.anker ? tx("vom übernommenen Punkt", "the transferred point") : familieVon(s) === "kurz" && s.kurz.art === "knoten" ? tx("vom Punkt auf dem Arm", "the point on the arm") : tx("von der Stelle", "the site");
+  if (w.d > WEIT_M) out.push(tx(`Der Link liegt ${nr(w.d)} m ${wovon} entfernt.`, `The link is ${nr(w.d)} m away from ${wovon}.`));
+  if (w.weit) out.push(tx(`Kein Link liegt innerhalb von ${nr(Number($("winkel").value) || 60)}° der genannten Richtung (${kurz(s.r.grad)}). Dieser weicht ${nr(w.abweichung)}° ab, liegt aber näher an ihr als seine Gegenrichtung – die Quelle nennt wohl nur eine grobe Himmelsrichtung.`, `No link is within ${nr(Number($("winkel").value) || 60)}° of the given direction (${kurz(s.r.grad)}). This one is ${nr(w.abweichung)}° off but closer to it than its opposite direction – the source probably only gives a rough compass direction.`));
+  else if (w.abweichung != null && w.abweichung > WINKEL_PRUEFEN) out.push(tx(`Die Richtung des Links weicht um ${nr(w.abweichung)}° ab.`, `The link's direction is ${nr(w.abweichung)}° off.`));
   if (k[0] && k[0].i !== w.i) {
     const an = inhaberText(k[0].id, s);
-    out.push(`Der nächste Link ist an eine andere Stelle vergeben${an ? `: ${an}` : ""}.`);
+    out.push(tx(`Der nächste Link ist an eine andere Stelle vergeben${an ? `: ${an}` : ""}.`, `The nearest link is taken by another site${an ? `: ${an}` : ""}.`));
   }
   return out;
 }
@@ -1717,7 +1802,7 @@ function lageVon(s) {
 }
 const zaehle = (lage) => state.stellen.filter((s) => lageVon(s) === lage).length;
 /** Die Richtung einer Stelle in Worten, wie die Quelle sie nennt. */
-const richtungsText = (s) => s.richtungText || "";
+const richtungsText = (s) => richtungAnzeige(s) || "";
 
 // ---------- Entscheidungen ----------
 const speicherSchluessel = () => (state.netz ? `snapper.entscheide:${state.netz.key}` : null);
@@ -1789,7 +1874,7 @@ async function nimmLink(id, { i, link = null }) {
     link = r?.link;
   }
   if (!link) return;
-  let meldung = `${s.name || s.id}: Link ${link.id} festgelegt.`;
+  let meldung = tx(`${s.name || s.id}: Link ${link.id} festgelegt.`, `${s.name || s.id}: link ${link.id} set.`);
   const modi = ausgabeModi(s);
   for (const [andere, e] of state.entscheid) {
     const t = state.byId.get(andere);
@@ -1798,12 +1883,12 @@ async function nimmLink(id, { i, link = null }) {
     const gleicheFamilie = (t ? familieVon(t) : familieVonId(andere)) === familieVon(s);
     if (andere !== id && e.link?.id === link.id && gleicheFamilie && (!t || ausgabeModi(t).some((m) => modi.includes(m)))) {
       e.link = null;
-      meldung += ` ${t?.name || andere} hatte ihn und sucht neu.`;
+      meldung += tx(` ${t?.name || andere} hatte ihn und sucht neu.`, ` ${t?.name || andere} had it and searches again.`);
     }
   }
   if (familieVon(s) === "kurz") {
     const dauer = (state.inhaber?.get(link.id) ?? []).filter((t) => familieVon(t) === "dauer" && ausgabeModi(t).some((m) => modi.includes(m)));
-    if (dauer.length) meldung += ` Auf dem Link liegt auch ${dauer.map(stelleText).join(", ")}; beide gehen in ihre eigene Datei.`;
+    if (dauer.length) meldung += tx(` Auf dem Link liegt auch ${dauer.map(stelleText).join(", ")}; beide gehen in ihre eigene Datei.`, ` ${dauer.map(stelleText).join(", ")} is also on this link; each goes into its own file.`);
   }
   const e = entscheid(id);
   e.link = link;
@@ -1867,7 +1952,7 @@ async function tausche(id) {
   ]);
   Object.assign(entscheid(s.id), { link: fuerS.link, aus: false, anker: null, uebernommen: null });
   Object.assign(entscheid(t.id), { link: fuerT.link, aus: false, anker: null, uebernommen: null });
-  geaendert(`${s.name}: ${s.r.ziel} und ${t.r.ziel} haben die Links getauscht.`);
+  geaendert(tx(`${s.name}: ${zielText(s)} und ${zielText(t)} haben die Links getauscht.`, `${s.name}: ${zielText(s)} and ${zielText(t)} swapped their links.`));
 }
 
 // ---------- Wählen auf der Karte ----------
@@ -1903,7 +1988,7 @@ function waehle(id, { fliegen = true } = {}) {
 
 function naechste() {
   const liste = state.stellen.filter((s) => familiePasst(s) && (lageVon(s) === "pruefen" || lageVon(s) === "ohne"));
-  if (!liste.length) return setStatus("Nichts mehr zu prüfen.", "done");
+  if (!liste.length) return setStatus(() => tx("Nichts mehr zu prüfen.", "Nothing left to review."), "done");
   const at = liste.findIndex((s) => s.id === state.auswahl);
   waehle(liste[(at + 1) % liste.length].id);
 }
@@ -1959,10 +2044,10 @@ function renderStats() {
   $("auswahl-stats").hidden = !b;
   if (!b) return;
   const dauer = state.stellen.filter((s) => familieVon(s) === "dauer");
-  $("st-gebiet-titel").textContent = state.gebiet ? "Im Gebiet" : "Im Netzgebiet";
-  $("st-gebiet").textContent = de(b.imGebiet);
-  $("st-gerichtet").textContent = de(dauer.length);
-  $("st-link").textContent = de(dauer.filter((s) => linkVon(s)).length);
+  $("st-gebiet-titel").textContent = state.gebiet ? tx("Im Gebiet", "In the area") : tx("Im Netzgebiet", "In network area");
+  $("st-gebiet").textContent = nr(b.imGebiet);
+  $("st-gerichtet").textContent = nr(dauer.length);
+  $("st-link").textContent = nr(dauer.filter((s) => linkVon(s)).length);
   renderKurzStats();
 }
 
@@ -1973,12 +2058,21 @@ function renderAuswahl() {
   t.hidden = !b;
   if (!b) return;
   const teile = [];
-  const eine = (n, eins, viele) => `${de(n)} ${n === 1 ? eins : viele}`;
-  if (b.gruende.lizenz) teile.push(`${eine(b.gruende.lizenz, "stammt", "stammen")} aus Quellen ohne Lizenz (${b.ohneLizenz.map(esc).join(", ")})`);
-  if (b.gruende.kompass) teile.push(`${eine(b.gruende.kompass, "nennt", "nennen")} nur ein Ziel`);
-  if (b.gruende.gruppe) teile.push(`${eine(b.gruende.gruppe, "zählt", "zählen")} keine der gewählten Gruppen`);
-  const quer = b.gruende.beide ? ` Nur angezeigt: ${eine(b.gruende.beide, "zählt beide Richtungen zusammen oder nennt keine", "zählen beide Richtungen zusammen oder nennen keine")} (die meisten Rad-Zählstellen). Sie passen auf keinen einzelnen Link; auf der Karte sind sie violett und werden nicht zugeordnet.` : "";
-  t.innerHTML = `${teile.length ? `Draußen bleiben: ${teile.join("; ")}.` : "Alle gerichteten Stellen im Gebiet sind dabei."}${quer}`;
+  const eine = (n, eins, viele) => `${nr(n)} ${n === 1 ? eins : viele}`;
+  const g = b.gruende;
+  if (sprache() === "de") {
+    if (g.lizenz) teile.push(`${eine(g.lizenz, "stammt", "stammen")} aus Quellen ohne Lizenz (${b.ohneLizenz.map(esc).join(", ")})`);
+    if (g.kompass) teile.push(`${eine(g.kompass, "nennt", "nennen")} nur ein Ziel`);
+    if (g.gruppe) teile.push(`${eine(g.gruppe, "zählt", "zählen")} keine der gewählten Gruppen`);
+    const quer = g.beide ? ` Nur angezeigt: ${eine(g.beide, "zählt beide Richtungen zusammen oder nennt keine", "zählen beide Richtungen zusammen oder nennen keine")} (die meisten Rad-Zählstellen). Sie passen auf keinen einzelnen Link; auf der Karte sind sie violett und werden nicht zugeordnet.` : "";
+    t.innerHTML = `${teile.length ? `Draußen bleiben: ${teile.join("; ")}.` : "Alle gerichteten Stellen im Gebiet sind dabei."}${quer}`;
+  } else {
+    if (g.lizenz) teile.push(`${eine(g.lizenz, "comes", "come")} from sources without a licence (${b.ohneLizenz.map(esc).join(", ")})`);
+    if (g.kompass) teile.push(`${eine(g.kompass, "names", "name")} only a destination`);
+    if (g.gruppe) teile.push(`${eine(g.gruppe, "counts", "count")} none of the chosen groups`);
+    const quer = g.beide ? ` Shown only: ${eine(g.beide, "counts both directions together or names none", "count both directions together or name none")} (most cycle counters). They fit no single link; on the map they are purple and are not assigned.` : "";
+    t.innerHTML = `${teile.length ? `Left out: ${teile.join("; ")}.` : "All directional sites in the area are included."}${quer}`;
+  }
   renderGruppen();
 }
 
@@ -1991,10 +2085,10 @@ function renderGruppen() {
     const cfg = state.gruppen[g];
     const tr = document.createElement("tr");
     tr.className = cfg.an ? "" : "off";
-    tr.innerHTML = `<td><label class="check"><input type="checkbox" data-g="${g}" data-f="an"${cfg.an ? " checked" : ""}>${esc(d.gruppenNamen[g] ?? g)}</label></td>
-      <td><input type="text" data-g="${g}" data-f="mode" value="${esc(cfg.mode)}" spellcheck="false" aria-label="networkMode für ${esc(g)}"></td>
-      <td><input type="text" data-g="${g}" data-f="link" value="${esc(cfg.link)}" spellcheck="false" aria-label="Modi, die der Link erlauben muss, für ${esc(g)}"></td>
-      <td class="n">${state.bereich?.dauer ? de(zaehler[g]) : ""}</td>`;
+    tr.innerHTML = `<td><label class="check"><input type="checkbox" data-g="${g}" data-f="an"${cfg.an ? " checked" : ""}>${esc(gruppenName(g))}</label></td>
+      <td><input type="text" data-g="${g}" data-f="mode" value="${esc(cfg.mode)}" spellcheck="false" aria-label="${esc(tx(`networkMode für ${g}`, `networkMode for ${g}`))}"></td>
+      <td><input type="text" data-g="${g}" data-f="link" value="${esc(cfg.link)}" spellcheck="false" aria-label="${esc(tx(`Modi, die der Link erlauben muss, für ${g}`, `Modes the link must allow, for ${g}`))}"></td>
+      <td class="n">${state.bereich?.dauer ? nr(zaehler[g]) : ""}</td>`;
     return tr;
   }));
   renderModusHinweis();
@@ -2016,15 +2110,16 @@ function renderModusHinweis() {
       const gesucht = cfg.link.split(",").map((m) => m.trim().toLowerCase()).filter(Boolean);
       if (!gesucht.length || gesucht.some((m) => imNetz.has(m))) continue;
       const ersatz = gesucht.flatMap((m) => MODUS_GLEICH[m] ?? []).find((m) => imNetz.has(m));
-      const name = state.daten?.gruppenNamen[g] ?? g;
-      const knopf = ersatz ? ` <button type="button" class="linkbtn" data-g="${esc(g)}" data-modus="${esc(ersatz)}">${esc(name)} auf ${esc(ersatz)} stellen</button>` : "";
-      zeilen.push(`Kein Link im Netz erlaubt ${gesucht.map((m) => `<code>${esc(m)}</code>`).join(" oder ")} (${esc(name)}).${knopf}`);
+      const name = gruppenName(g);
+      const knopf = ersatz ? ` <button type="button" class="linkbtn" data-g="${esc(g)}" data-modus="${esc(ersatz)}">${esc(tx(`${name} auf ${ersatz} stellen`, `Set ${name} to ${ersatz}`))}</button>` : "";
+      const codes = gesucht.map((m) => `<code>${esc(m)}</code>`).join(tx(" oder ", " or "));
+      zeilen.push(tx(`Kein Link im Netz erlaubt ${codes} (${esc(name)}).${knopf}`, `No link in the network allows ${codes} (${esc(name)}).${knopf}`));
     }
   }
   box.hidden = !zeilen.length;
   if (!zeilen.length) return;
-  const bekannt = Object.entries(modi).sort((a, b) => b[1] - a[1]).map(([m, n]) => `<code>${esc(m)}</code> (${de(n)})`).join(", ");
-  box.innerHTML = `${zeilen.join(" ")} Das Netz kennt: ${bekannt}.`;
+  const bekannt = Object.entries(modi).sort((a, b) => b[1] - a[1]).map(([m, n]) => `<code>${esc(m)}</code> (${nr(n)})`).join(", ");
+  box.innerHTML = `${zeilen.join(" ")} ${tx(`Das Netz kennt: ${bekannt}.`, `The network has: ${bekannt}.`)}`;
 }
 $("gruppen-hinweis").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-g]");
@@ -2057,18 +2152,18 @@ for (const id of ["radius", "winkel"]) $(id).addEventListener("change", () => st
 $("ohne-kompass").addEventListener("change", () => state.netz && waehleStellen());
 
 const FILTER = [
-  ["alle", "Alle"],
-  ["pruefen", "Prüfen"],
-  ["ohne", "Ohne Link"],
-  ["passt", "Passt"],
-  ["geprueft", "Geprüft"],
-  ["aus", "Ausgelassen"],
-  ["quer", "Beide Richtungen"],
+  ["alle", "Alle", "All"],
+  ["pruefen", "Prüfen", "To review"],
+  ["ohne", "Ohne Link", "No link"],
+  ["passt", "Passt", "Matched"],
+  ["geprueft", "Geprüft", "Reviewed"],
+  ["aus", "Ausgelassen", "Skipped"],
+  ["quer", "Beide Richtungen", "Both directions"],
 ];
 const FAMILIEN = [
-  ["alle", "Alle"],
-  ["dauer", "Dauer"],
-  ["kurz", "Kurzzeit"],
+  ["alle", "Alle", "All"],
+  ["dauer", "Dauer", "Permanent"],
+  ["kurz", "Kurzzeit", "Short-term"],
 ];
 // in der Liste gehören die Stellen ohne Richtung zu den Dauerzählstellen
 const familiePasst = (s) => state.familie === "alle" || (familieVon(s) === "kurz" ? "kurz" : "dauer") === state.familie;
@@ -2077,26 +2172,28 @@ function renderFilter() {
   const fam = $("familie");
   fam.hidden = !kurze;
   if (!kurze && state.familie !== "alle") state.familie = "alle";
-  fam.replaceChildren(...FAMILIEN.map(([wert, text]) => {
+  fam.replaceChildren(...FAMILIEN.map(([wert, de, en]) => {
+    const text = tx(de, en);
     const n = wert === "alle" ? state.stellen.length : wert === "kurz" ? kurze : state.stellen.length - kurze;
     const b = document.createElement("button");
     b.type = "button";
     b.setAttribute("role", "radio");
     b.setAttribute("aria-checked", String(state.familie === wert));
     b.value = wert;
-    b.innerHTML = `${text}<span>${de(n)}</span>`;
+    b.innerHTML = `${text}<span>${nr(n)}</span>`;
     return b;
   }));
   const box = $("filter");
   const teil = state.stellen.filter(familiePasst);
-  box.replaceChildren(...FILTER.map(([wert, text]) => {
+  box.replaceChildren(...FILTER.map(([wert, de, en]) => {
+    const text = tx(de, en);
     const n = wert === "alle" ? teil.length : teil.filter((s) => lageVon(s) === wert).length;
     const b = document.createElement("button");
     b.type = "button";
     b.setAttribute("role", "radio");
     b.setAttribute("aria-checked", String(state.filter === wert));
     b.value = wert;
-    b.innerHTML = `${text}<span>${de(n)}</span>`;
+    b.innerHTML = `${text}<span>${nr(n)}</span>`;
     b.disabled = !n && wert !== "alle";
     b.hidden = wert === "quer" && !n;
     return b;
@@ -2121,8 +2218,8 @@ const sichtbare = () => state.stellen.filter((s) => familiePasst(s) && (state.fi
 
 /** Die zweite Zeile eines Eintrags: Richtung und Kennung, bei Kurzzeit-Punkten dazu der Tag der Zählung. */
 const listenText = (s) => {
-  if (familieVon(s) === "kurz") return `${s.richtungText} · ${datumText(s.kurz.datum)} · ${s.kurz.stelle}`;
-  if (familieVon(s) === "quer") return `${richtungsText(s) || "ohne Fahrtrichtung"}, nur angezeigt · ${s.id}`;
+  if (familieVon(s) === "kurz") return `${richtungAnzeige(s)} · ${datumText(s.kurz.datum)} · ${s.kurz.stelle}`;
+  if (familieVon(s) === "quer") return tx(`${richtungsText(s) || "ohne Fahrtrichtung"}, nur angezeigt · ${s.id}`, `${richtungsText(s) || "no direction"}, shown only · ${s.id}`);
   return `${richtungsText(s)} · ${s.id}`;
 };
 
@@ -2132,7 +2229,7 @@ function renderListe() {
   if (!alle.length) {
     const li = document.createElement("li");
     li.className = "empty";
-    li.textContent = state.stellen.length ? "Keine Stellen in dieser Auswahl." : "Noch keine Zählstellen.";
+    li.textContent = state.stellen.length ? tx("Keine Stellen in dieser Auswahl.", "No sites in this selection.") : tx("Noch keine Zählstellen.", "No count sites yet.");
     ul.replaceChildren(li);
     return;
   }
@@ -2148,9 +2245,9 @@ function renderListe() {
     b.type = "button";
     b.dataset.id = s.id;
     b.setAttribute("aria-current", String(s.id === state.auswahl));
-    b.innerHTML = `<span class="dot${familieVon(s) === "kurz" ? " ring" : ""}" style="--c: var(${LAGE_FARBE[lage]})" title="${esc(LAGE_TEXT[lage])}${familieVon(s) === "kurz" ? ", Kurzzeitzählung" : ""}"></span>
-      <span class="t">${esc(s.name || s.id)} <small>${esc(s.abschnitt ?? "")}</small></span>
-      <span class="m">${link?.d != null ? `${de(link.d)} m` : "–"}</span>
+    b.innerHTML = `<span class="dot${familieVon(s) === "kurz" ? " ring" : ""}" style="--c: var(${LAGE_FARBE[lage]})" title="${esc(lageText(lage))}${familieVon(s) === "kurz" ? tx(", Kurzzeitzählung", ", short-term count") : ""}"></span>
+      <span class="t">${esc(s.name || s.id)} <small>${esc(abschnittText(s) ?? "")}</small></span>
+      <span class="m">${link?.d != null ? `${nr(link.d)} m` : "–"}</span>
       <span class="s">${esc(listenText(s))}</span>`;
     li.append(b);
     return li;
@@ -2158,7 +2255,7 @@ function renderListe() {
   if (alle.length > liste.length) {
     const li = document.createElement("li");
     li.className = "empty";
-    li.textContent = `… und ${de(alle.length - liste.length)} weitere. Mit den Filtern eingrenzen, „Nächste zum Prüfen“ nehmen oder auf der Karte wählen.`;
+    li.textContent = tx(`… und ${nr(alle.length - liste.length)} weitere. Mit den Filtern eingrenzen, „Nächste zum Prüfen“ nehmen oder auf der Karte wählen.`, `… and ${nr(alle.length - liste.length)} more. Narrow down with the filters, use “Next to review” or pick on the map.`);
     items.push(li);
   }
   ul.replaceChildren(...items);
@@ -2170,14 +2267,14 @@ $("liste").addEventListener("click", (e) => {
 
 function kompassSvg(grad) {
   if (grad == null) return "";
-  return `<span class="kompass" title="${de(grad)}°"><svg viewBox="-10 -10 20 20" aria-hidden="true"><path d="M0 -8 L5 6 L0 3 L-5 6 Z" fill="currentColor" transform="rotate(${grad})"/></svg></span>`;
+  return `<span class="kompass" title="${nr(grad)}°"><svg viewBox="-10 -10 20 20" aria-hidden="true"><path d="M0 -8 L5 6 L0 3 L-5 6 Z" fill="currentColor" transform="rotate(${grad})"/></svg></span>`;
 }
 
 function profilSvg(s) {
   const r = state.ergebnisMittel.get(s.id);
   if (!r) return "";
   const gruppen = Object.keys(r).filter((g) => r[g].werte.some((v) => v != null));
-  if (!gruppen.length) return '<p class="note">Im gewählten Zeitraum gibt es für diese Stelle keine Werte.</p>';
+  if (!gruppen.length) return `<p class="note">${tx("Im gewählten Zeitraum gibt es für diese Stelle keine Werte.", "There are no values for this site in the chosen period.")}</p>`;
   const max = Math.max(...gruppen.flatMap((g) => r[g].werte.filter((v) => v != null)));
   const W = 360;
   const H = 92;
@@ -2189,16 +2286,18 @@ function profilSvg(s) {
     r[g].werte.forEach((v, h) => {
       if (v == null) return;
       const hoehe = ((H - unten - 4) * v) / max;
-      bars += `<rect x="${(h * breit + gi * (balken + 1)).toFixed(1)}" y="${(H - unten - hoehe).toFixed(1)}" width="${balken.toFixed(1)}" height="${hoehe.toFixed(1)}" fill="${GRUPPE_FARBE[g] ?? "#888"}"><title>${g} ${h}–${h + 1} Uhr: ${de(v, 1)} (${r[g].tage[h]} Tage)</title></rect>`;
+      bars += `<rect x="${(h * breit + gi * (balken + 1)).toFixed(1)}" y="${(H - unten - hoehe).toFixed(1)}" width="${balken.toFixed(1)}" height="${hoehe.toFixed(1)}" fill="${GRUPPE_FARBE[g] ?? "#888"}"><title>${tx(`${g} ${h}–${h + 1} Uhr: ${nr(v, 1)} (${r[g].tage[h]} Tage)`, `${g} ${h}:00–${h + 1}:00: ${nr(v, 1)} (${r[g].tage[h]} days)`)}</title></rect>`;
     });
   });
   const ticks = [0, 6, 12, 18, 23].map((h) => `<text x="${(h * breit + breit / 2).toFixed(1)}" y="${H - 2}" text-anchor="middle">${h}</text>`).join("");
   // eine Stelle ohne Richtung geht in keine Ausgabe: dort kein networkMode in der Legende
   const modus = (g) => (familieVon(s) === "quer" ? "" : ` → ${esc(state.gruppen[g].mode)}`);
-  const leg = gruppen.map((g) => `<span><i style="--c:${GRUPPE_FARBE[g]}"></i>${esc(state.daten.gruppenNamen[g] ?? g)}${modus(g)}: ${de(r[g].tageGenutzt)} Tage${r[g].vollstaendig ? "" : ", nicht alle Stunden"}</span>`).join("");
-  return `<svg class="profil" viewBox="0 0 ${W} ${H}" role="img" aria-label="Tagesgang der Stelle"><text x="0" y="9">${de(max)} Fz/h</text>${bars}${ticks}</svg><div class="legende-profil">${leg}</div>`;
+  const leg = gruppen.map((g) => `<span><i style="--c:${GRUPPE_FARBE[g]}"></i>${esc(gruppenName(g))}${modus(g)}: ${tx(`${nr(r[g].tageGenutzt)} Tage${r[g].vollstaendig ? "" : ", nicht alle Stunden"}`, `${nr(r[g].tageGenutzt)} days${r[g].vollstaendig ? "" : ", not all hours"}`)}</span>`).join("");
+  return `<svg class="profil" viewBox="0 0 ${W} ${H}" role="img" aria-label="${tx("Tagesgang der Stelle", "Daily profile of the site")}"><text x="0" y="9">${nr(max)} ${tx("Fz/h", "veh/h")}</text>${bars}${ticks}</svg><div class="legende-profil">${leg}</div>`;
 }
 
+const TAGTYP_EN = { s: "School day", f: "School holiday", h: "Public holiday", w: "Weekend", u: "no calendar" };
+const tagtypText = (t) => (sprache() === "de" ? TAGTYP[t] : TAGTYP_EN[t]) ?? "";
 const lizenzLink = (l) => (l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.lizenz)}</a>` : esc(l.lizenz));
 
 /** Die gezählten Stunden eines Kurzzeit-Punkts als Balken, je Gruppe; nicht gezählte Stunden bleiben leer. */
@@ -2218,7 +2317,7 @@ function profilKurzSvg(s) {
       const h = p.h0 + k;
       if (v == null || h < 0 || h > 23) return;
       const hoehe = ((H - unten - 4) * v) / max;
-      bars += `<rect x="${(h * breit + gi * (balken + 1)).toFixed(1)}" y="${(H - unten - hoehe).toFixed(1)}" width="${balken.toFixed(1)}" height="${hoehe.toFixed(1)}" fill="${GRUPPE_FARBE[g] ?? "#888"}"><title>${g} ${h}–${h + 1} Uhr: ${de(v)}</title></rect>`;
+      bars += `<rect x="${(h * breit + gi * (balken + 1)).toFixed(1)}" y="${(H - unten - hoehe).toFixed(1)}" width="${balken.toFixed(1)}" height="${hoehe.toFixed(1)}" fill="${GRUPPE_FARBE[g] ?? "#888"}"><title>${tx(`${g} ${h}–${h + 1} Uhr: ${nr(v)}`, `${g} ${h}:00–${h + 1}:00: ${nr(v)}`)}</title></rect>`;
     });
   });
   const ticks = [0, 6, 12, 18, 23].map((h) => `<text x="${(h * breit + breit / 2).toFixed(1)}" y="${H - 2}" text-anchor="middle">${h}</text>`).join("");
@@ -2226,9 +2325,9 @@ function profilKurzSvg(s) {
   const leg = gruppen.map((g) => {
     const n = p.werte[g].filter((v) => v != null).length;
     const summe = p.werte[g].reduce((a, v) => a + (v ?? 0), 0);
-    return `<span><i style="--c:${GRUPPE_FARBE[g]}"></i>${esc(namen[g] ?? g)} → ${esc(state.gruppen[g].mode)}: ${de(n)} gezählte Stunden, Summe ${de(summe)}</span>`;
+    return `<span><i style="--c:${GRUPPE_FARBE[g]}"></i>${esc(gruppenName(g, namen))} → ${esc(state.gruppen[g].mode)}: ${tx(`${nr(n)} gezählte Stunden, Summe ${nr(summe)}`, `${nr(n)} counted hours, total ${nr(summe)}`)}</span>`;
   }).join("");
-  return `<svg class="profil" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gezählte Stunden"><text x="0" y="9">${de(max)} Fz/h</text>${bars}${ticks}</svg><div class="legende-profil">${leg}</div><p class="note">Ein gezählter Tag, nur die gezählten Stunden (${esc(p.fenster)} Uhr): kein Mittel, keine Hochrechnung.</p>`;
+  return `<svg class="profil" viewBox="0 0 ${W} ${H}" role="img" aria-label="${tx("Gezählte Stunden", "Counted hours")}"><text x="0" y="9">${nr(max)} ${tx("Fz/h", "veh/h")}</text>${bars}${ticks}</svg><div class="legende-profil">${leg}</div><p class="note">${tx(`Ein gezählter Tag, nur die gezählten Stunden (${esc(p.fenster)} Uhr): kein Mittel, keine Hochrechnung.`, `One counted day, only the counted hours (${esc(p.fenster)} h): no average, no extrapolation.`)}</p>`;
 }
 
 /** Kopf der Karte einer Kurzzeit-Stelle: Zählung, Tag, Lizenz, Lage. */
@@ -2237,30 +2336,35 @@ function kopfKurz(s) {
   const q = state.kurz.manifest?.quellen.get(p.quelle);
   const namen = state.kurz.manifest?.gruppenNamen ?? {};
   const liz = [s.lizenz.lieferung, s.lizenz.lage].filter(Boolean);
-  const lage = p.lage === "geokodiert" ? "Lage aus OpenStreetMap geokodiert (Straßenkreuzung): Der Punkt kann an der Kreuzung liegen statt an der Zählstelle." : p.lage === "uebertragen" ? "Lage von anderen Zählungen derselben Stelle übertragen." : null;
+  const lage = p.lage === "geokodiert"
+    ? tx("Lage aus OpenStreetMap geokodiert (Straßenkreuzung): Der Punkt kann an der Kreuzung liegen statt an der Zählstelle.", "Location geocoded from OpenStreetMap (road junction): the point may lie at the junction instead of the count site.")
+    : p.lage === "uebertragen" ? tx("Lage von anderen Zählungen derselben Stelle übertragen.", "Location transferred from other counts at the same site.") : null;
   const stroeme = p.stroeme.map(([a, b]) => `${a}→${b}`).join(", ");
   return `
-    <div><h3>${esc(s.name || p.stelle)}</h3><p class="sub">${esc(s.richtungText)}</p></div>
-    <div class="meta">${kompassSvg(s.r.grad)}<span>${s.r.grad != null ? `${kurz(s.r.grad)} ${de(s.r.grad)}°` : "ohne Richtung"}</span>·<span>${p.art === "knoten" ? `Knoten, Punkt ${de(state.kurz.opts.abstand)} m auf dem Arm` : "Querschnitt"}</span>·<span title="Ströme von Arm nach Arm">Ströme ${esc(stroeme)}</span></div>
-    <div class="meta"><span class="chip">Kurzzeitzählung</span><span>${esc(datumText(p.datum))}</span>·<span>${esc(TAGTYP[p.tag ?? "u"] ?? "")}</span>·<span>${esc(p.fenster)} Uhr</span>${p.intervall ? `·<span>${esc(p.intervall)}-Minuten-Werte</span>` : ""}</div>
-    <div class="meta"><span>${esc(p.stelle)}</span>·<span>${esc(p.kennung)}</span>·<span>${esc(q?.name ?? p.quelle)}</span>·<span>${liz.map(lizenzLink).join(", ")}</span>·<span>${s.aktiv.map((g) => esc(namen[g] ?? g)).join(", ")}</span></div>
+    <div><h3>${esc(s.name || p.stelle)}</h3><p class="sub">${esc(richtungAnzeige(s))}</p></div>
+    <div class="meta">${kompassSvg(s.r.grad)}<span>${s.r.grad != null ? `${kurz(s.r.grad)} ${nr(s.r.grad)}°` : tx("ohne Richtung", "no direction")}</span>·<span>${p.art === "knoten" ? tx(`Knoten, Punkt ${nr(state.kurz.opts.abstand)} m auf dem Arm`, `Junction, point ${nr(state.kurz.opts.abstand)} m along the arm`) : tx("Querschnitt", "Cross-section")}</span>·<span title="${tx("Ströme von Arm nach Arm", "Movements from arm to arm")}">${tx("Ströme", "Movements")} ${esc(stroeme)}</span></div>
+    <div class="meta"><span class="chip">${tx("Kurzzeitzählung", "Short-term count")}</span><span>${esc(datumText(p.datum))}</span>·<span>${esc(tagtypText(p.tag ?? "u"))}</span>·<span>${esc(p.fenster)} ${tx("Uhr", "h")}</span>${p.intervall ? `·<span>${esc(tx(`${p.intervall}-Minuten-Werte`, `${p.intervall}-minute values`))}</span>` : ""}</div>
+    <div class="meta"><span>${esc(p.stelle)}</span>·<span>${esc(p.kennung)}</span>·<span>${esc(q?.name ?? p.quelle)}</span>·<span>${liz.map(lizenzLink).join(", ")}</span>·<span>${s.aktiv.map((g) => esc(gruppenName(g, namen))).join(", ")}</span></div>
     ${lage ? `<p class="note">${esc(lage)}</p>` : ""}
-    ${p.andere.length ? `<p class="note">Am selben Tag gibt es hier ${p.andere.length === 1 ? "eine weitere Zählung" : "weitere Zählungen"} (${esc(p.andere.join(", "))}), etwa zu anderen Stunden oder auf dem anderen Gehweg; sie ${p.andere.length === 1 ? "bleibt" : "bleiben"} draußen.</p>` : ""}`;
+    ${p.andere.length ? `<p class="note">${tx(
+      `Am selben Tag gibt es hier ${p.andere.length === 1 ? "eine weitere Zählung" : "weitere Zählungen"} (${esc(p.andere.join(", "))}), etwa zu anderen Stunden oder auf dem anderen Gehweg; sie ${p.andere.length === 1 ? "bleibt" : "bleiben"} draußen.`,
+      `On the same day there ${p.andere.length === 1 ? "is another count" : "are other counts"} here (${esc(p.andere.join(", "))}), e.g. at other hours or on the other footway; ${p.andere.length === 1 ? "it is" : "they are"} left out.`,
+    )}</p>` : ""}`;
 }
 
 /** Steckbrief einer Stelle ohne Richtung: was sie zählt und warum sie an keinen Link geht, dazu ihr Tagesgang. */
 function karteQuer(box, s) {
   const q = state.daten.quellen.get(s.quelle);
   const warum = s.r.art === "beide"
-    ? "Die Stelle zählt beide Fahrtrichtungen zusammen."
-    : "Die Quelle nennt keine Fahrtrichtung. Meist zählt eine solche Stelle beide Richtungen zusammen, etwa an einem Radweg, der in beiden Richtungen befahren wird.";
+    ? tx("Die Stelle zählt beide Fahrtrichtungen zusammen.", "The site counts both directions together.")
+    : tx("Die Quelle nennt keine Fahrtrichtung. Meist zählt eine solche Stelle beide Richtungen zusammen, etwa an einem Radweg, der in beiden Richtungen befahren wird.", "The source names no direction. Such a site usually counts both directions together, e.g. on a two-way cycle path.");
   box.innerHTML = `
-    <div><h3>${esc(s.name || s.id)}</h3>${s.abschnitt ? `<p class="sub">${esc(s.abschnitt)}</p>` : ""}</div>
-    <div class="meta">${kompassSvg(null)}<span>${esc(richtungsText(s) || "ohne Fahrtrichtung")}</span></div>
-    <div class="meta"><span>${esc(s.id)}</span>·<span>${esc(q.name)}</span>·<span>${q.lizenzen.map(lizenzLink).join(", ")}</span>·<span>${s.gruppen.map((g) => esc(state.daten.gruppenNamen[g] ?? g)).join(", ")}</span></div>
-    <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE.quer})">nicht richtungsfein · nur angezeigt</span></div>
-    <p class="note">${esc(warum)} Eine MATSim-Messstelle hängt an einem gerichteten Link, darum geht die Stelle an keinen Link und nicht in die Ausgabe. Der Tagesgang unten ist die Summe beider Richtungen.</p>
-    <div>${state.stunden.has(s.id) ? profilSvg(s) : '<p class="note">Stundenwerte werden geladen …</p>'}</div>`;
+    <div><h3>${esc(s.name || s.id)}</h3>${s.abschnitt ? `<p class="sub">${esc(abschnittText(s))}</p>` : ""}</div>
+    <div class="meta">${kompassSvg(null)}<span>${esc(richtungsText(s) || tx("ohne Fahrtrichtung", "no direction"))}</span></div>
+    <div class="meta"><span>${esc(s.id)}</span>·<span>${esc(q.name)}</span>·<span>${q.lizenzen.map(lizenzLink).join(", ")}</span>·<span>${s.gruppen.map((g) => esc(gruppenName(g))).join(", ")}</span></div>
+    <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE.quer})">${tx("nicht richtungsfein · nur angezeigt", "not directional · shown only")}</span></div>
+    <p class="note">${esc(warum)} ${tx("Eine MATSim-Messstelle hängt an einem gerichteten Link, darum geht die Stelle an keinen Link und nicht in die Ausgabe. Der Tagesgang unten ist die Summe beider Richtungen.", "A MATSim count station sits on one directed link, so this site goes to no link and not into the output. The daily profile below is the sum of both directions.")}</p>
+    <div>${state.stunden.has(s.id) ? profilSvg(s) : `<p class="note">${tx("Stundenwerte werden geladen …", "Loading hourly values …")}</p>`}</div>`;
 }
 
 function renderKarte() {
@@ -2280,33 +2384,37 @@ function renderKarte() {
   const gruende = lage === "pruefen" || lage === "ohne" ? gruendeVon(s) : [];
   const zeile = (k, v) => (v == null || v === "" ? "" : `<dt>${esc(k)}</dt><dd>${v}</dd>`);
   const linkHtml = link
-    ? `<dl class="linkinfo">${zeile("Link", esc(link.id))}${zeile("Abstand", link.d != null ? `${de(link.d, 1)} m` : null)}${zeile("Richtung", link.grad != null ? `${kurz(link.grad)} ${de(link.grad)}°${link.abweichung != null ? `, ${de(link.abweichung)}° Abweichung` : ""}` : null)}${zeile("type", esc(link.type ?? ""))}${zeile("name", esc(link.name ?? ""))}${zeile("modes", esc(link.modes || "(car)"))}${zeile("OSM-Weg", wegHtml(link.weg))}${zeile("Tempo", link.kmh != null ? `${de(link.kmh, 1)} km/h` : null)}${zeile("capacity", link.capacity != null && !link.osm ? `${de(link.capacity)} Fz/h, ${de(link.permlanes ?? 0, 1)} Fahrstreifen` : null)}</dl>`
+    ? `<dl class="linkinfo">${zeile("Link", esc(link.id))}${zeile(tx("Abstand", "Distance"), link.d != null ? `${nr(link.d, 1)} m` : null)}${zeile(tx("Richtung", "Direction"), link.grad != null ? `${kurz(link.grad)} ${nr(link.grad)}°${link.abweichung != null ? tx(`, ${nr(link.abweichung)}° Abweichung`, `, ${nr(link.abweichung)}° off`) : ""}` : null)}${zeile("type", esc(link.type ?? ""))}${zeile("name", esc(link.name ?? ""))}${zeile("modes", esc(link.modes || "(car)"))}${zeile(tx("OSM-Weg", "OSM way"), wegHtml(link.weg))}${zeile(tx("Tempo", "Speed"), link.kmh != null ? `${nr(link.kmh, 1)} km/h` : null)}${zeile("capacity", link.capacity != null && !link.osm ? tx(`${nr(link.capacity)} Fz/h, ${nr(link.permlanes ?? 0, 1)} Fahrstreifen`, `${nr(link.capacity)} veh/h, ${nr(link.permlanes ?? 0, 1)} lanes`) : null)}</dl>`
     : "";
   // ein Kurzzeit-Punkt von Hand auf einem Link einer Dauerzählstelle: erlaubt, aber sagen
   const dauerDort = kurzPunkt && link ? (state.inhaber?.get(link.id) ?? []).filter((t) => familieVon(t) === "dauer" && ausgabeModi(t).some((m) => ausgabeModi(s).includes(m))) : [];
   const kopf = kurzPunkt
     ? kopfKurz(s)
     : `
-    <div><h3>${esc(s.name || s.id)}</h3>${s.abschnitt ? `<p class="sub">${esc(s.abschnitt)}</p>` : ""}</div>
+    <div><h3>${esc(s.name || s.id)}</h3>${s.abschnitt ? `<p class="sub">${esc(abschnittText(s))}</p>` : ""}</div>
     <div class="meta">${kompassSvg(s.r.grad)}<span>${esc(richtungsText(s))}</span></div>
-    <div class="meta"><span>${esc(s.id)}</span>·<span>${esc(q.name)}</span>·<span>${lizenz}</span>·<span>${s.gruppen.map((g) => esc(state.daten.gruppenNamen[g] ?? g)).join(", ")}</span></div>
-    ${state.stunden.get(s.id)?.fahrstreifen?.length ? `<div class="meta"><span>Fahrstreifen: ${esc(state.stunden.get(s.id).fahrstreifen.join(", "))}</span></div>` : ""}`;
-  const profil = kurzPunkt ? profilKurzSvg(s) : state.stunden.has(s.id) ? profilSvg(s) : '<p class="note">Stundenwerte werden geladen …</p>';
+    <div class="meta"><span>${esc(s.id)}</span>·<span>${esc(q.name)}</span>·<span>${lizenz}</span>·<span>${s.gruppen.map((g) => esc(gruppenName(g))).join(", ")}</span></div>
+    ${state.stunden.get(s.id)?.fahrstreifen?.length ? `<div class="meta"><span>${tx("Fahrstreifen", "Lanes")}: ${esc(state.stunden.get(s.id).fahrstreifen.join(", "))}</span></div>` : ""}`;
+  const profil = kurzPunkt ? profilKurzSvg(s) : state.stunden.has(s.id) ? profilSvg(s) : `<p class="note">${tx("Stundenwerte werden geladen …", "Loading hourly values …")}</p>`;
+  const woher = e?.uebernommen && e.link ? tx(" · übernommen", " · transferred") : e?.link && kand[0]?.id !== e.link.id ? tx(" · von Hand", " · by hand") : "";
+  const uebernommen = e?.uebernommen && e.link
+    ? tx(`Übernommen aus „${esc(e.uebernommen.netz ?? "einer Zuordnung")}“: ${esc(wieText(e.uebernommen.wie) ?? e.uebernommen.wie)}${e.uebernommen.d != null ? `, ${nr(e.uebernommen.d, 1)} m vom übernommenen Punkt` : ""}.`, `Transferred from “${esc(e.uebernommen.netz ?? "an assignment")}”: ${esc(wieText(e.uebernommen.wie) ?? e.uebernommen.wie)}${e.uebernommen.d != null ? `, ${nr(e.uebernommen.d, 1)} m from the transferred point` : ""}.`)
+    : "";
   box.innerHTML = `${kopf}
-    <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE[lage]})">${esc(LAGE_TEXT[lage])}${e?.uebernommen && e.link ? " · übernommen" : e?.link && kand[0]?.id !== e.link.id ? " · von Hand" : ""}</span></div>
-    ${dauerDort.length ? `<p class="note">Auf diesem Link liegt auch ${esc(dauerDort.map(stelleText).join(", "))}. Beide gehen in ihre eigene Datei.</p>` : ""}
-    ${e?.uebernommen && e.link ? `<p class="note">Übernommen aus „${esc(e.uebernommen.netz ?? "einer Zuordnung")}“: ${esc(WIE[e.uebernommen.wie] ?? e.uebernommen.wie)}${e.uebernommen.d != null ? `, ${de(e.uebernommen.d, 1)} m vom übernommenen Punkt` : ""}.</p>` : ""}
+    <div class="row"><span class="lage" style="--c: var(${LAGE_FARBE[lage]})">${esc(lageText(lage))}${woher}</span></div>
+    ${dauerDort.length ? `<p class="note">${tx(`Auf diesem Link liegt auch ${esc(dauerDort.map(stelleText).join(", "))}. Beide gehen in ihre eigene Datei.`, `${esc(dauerDort.map(stelleText).join(", "))} is also on this link. Each goes into its own file.`)}</p>` : ""}
+    ${uebernommen ? `<p class="note">${uebernommen}</p>` : ""}
     ${gruende.length ? `<ul class="gruende">${gruende.map((g) => `<li>${esc(g)}</li>`).join("")}</ul>` : ""}
     ${linkHtml}
     <div class="row">
-      ${lage === "pruefen" || lage === "passt" ? '<button type="button" class="btn small" data-act="passt">Passt</button>' : ""}
-      ${lage !== "aus" ? `<button type="button" class="btn secondary small${state.pick ? " on" : ""}" data-act="pick">${state.pick ? "Wählen abbrechen" : "Auf der Karte wählen"}</button>` : ""}
-      ${partner && link && linkVon(partner) ? `<button type="button" class="btn secondary small" data-act="tausch" title="mit ${esc(richtungsText(partner))}">Mit Gegenrichtung tauschen</button>` : ""}
-      ${lage === "aus" ? '<button type="button" class="btn secondary small" data-act="ein">Wieder aufnehmen</button>' : '<button type="button" class="btn secondary small" data-act="aus">Auslassen</button>'}
-      ${e?.link ? '<button type="button" class="linkbtn" data-act="reset">Zurück zur automatischen Wahl</button>' : ""}
+      ${lage === "pruefen" || lage === "passt" ? `<button type="button" class="btn small" data-act="passt">${tx("Passt", "Accept")}</button>` : ""}
+      ${lage !== "aus" ? `<button type="button" class="btn secondary small${state.pick ? " on" : ""}" data-act="pick">${state.pick ? tx("Wählen abbrechen", "Cancel picking") : tx("Auf der Karte wählen", "Pick on the map")}</button>` : ""}
+      ${partner && link && linkVon(partner) ? `<button type="button" class="btn secondary small" data-act="tausch" title="${esc(tx(`mit ${richtungsText(partner)}`, `with ${richtungsText(partner)}`))}">${tx("Mit Gegenrichtung tauschen", "Swap with opposite direction")}</button>` : ""}
+      ${lage === "aus" ? `<button type="button" class="btn secondary small" data-act="ein">${tx("Wieder aufnehmen", "Include again")}</button>` : `<button type="button" class="btn secondary small" data-act="aus">${tx("Auslassen", "Skip")}</button>`}
+      ${e?.link ? `<button type="button" class="linkbtn" data-act="reset">${tx("Zurück zur automatischen Wahl", "Back to the automatic choice")}</button>` : ""}
     </div>
-    <div class="field"><label for="kommentar">Kommentar</label><textarea id="kommentar" rows="1" placeholder="geht in die CSV">${esc(e?.kommentar ?? "")}</textarea></div>
-    ${kand.length ? `<table class="kand"><caption class="visually-hidden">Links im Umkreis</caption><thead><tr><th></th><th>Link</th><th>Abstand</th><th>Abw.</th><th>Name / Typ</th><th></th></tr></thead><tbody>${kand.map((k, r) => `<tr class="${k.id === link?.id ? "cur" : ""}"><td><span class="rang">${r + 1}</span></td><td>${esc(k.id)}</td><td>${de(k.d, 1)} m</td><td>${k.abweichung != null ? `${de(k.abweichung)}°` : "–"}</td><td class="x" title="${esc([k.name, k.type].filter(Boolean).join(" · "))}">${esc([k.name, k.type].filter(Boolean).join(" · ") || "–")}</td><td>${k.id === link?.id || lage === "aus" ? "" : `<button type="button" class="linkbtn" data-act="nimm" data-i="${k.i}">nehmen</button>`}</td></tr>`).join("")}</tbody></table>` : '<p class="note">Kein Link im Umkreis. Auf der Karte lässt sich einer wählen.</p>'}
+    <div class="field"><label for="kommentar">${tx("Kommentar", "Comment")}</label><textarea id="kommentar" rows="1" placeholder="${tx("geht in die CSV", "goes into the CSV")}">${esc(e?.kommentar ?? "")}</textarea></div>
+    ${kand.length ? `<table class="kand"><caption class="visually-hidden">${tx("Links im Umkreis", "Links in the radius")}</caption><thead><tr><th></th><th>Link</th><th>${tx("Abstand", "Distance")}</th><th>${tx("Abw.", "Off")}</th><th>${tx("Name / Typ", "Name / type")}</th><th></th></tr></thead><tbody>${kand.map((k, r) => `<tr class="${k.id === link?.id ? "cur" : ""}"><td><span class="rang">${r + 1}</span></td><td>${esc(k.id)}</td><td>${nr(k.d, 1)} m</td><td>${k.abweichung != null ? `${nr(k.abweichung)}°` : "–"}</td><td class="x" title="${esc([k.name, k.type].filter(Boolean).join(" · "))}">${esc([k.name, k.type].filter(Boolean).join(" · ") || "–")}</td><td>${k.id === link?.id || lage === "aus" ? "" : `<button type="button" class="linkbtn" data-act="nimm" data-i="${k.i}">${tx("nehmen", "use")}</button>`}</td></tr>`).join("")}</tbody></table>` : `<p class="note">${tx("Kein Link im Umkreis. Auf der Karte lässt sich einer wählen.", "No link in the radius. You can pick one on the map.")}</p>`}
     <div>${profil}</div>`;
   const k = box.querySelector("#kommentar");
   k.addEventListener("change", () => {
@@ -2339,7 +2447,7 @@ async function ladeStunden(stellen) {
   let fertig = 0;
   let fehler = 0;
   const zeige = () => {
-    if (chunks.length > 1) $("stunden-text").textContent = `${de(fertig)} von ${de(chunks.length)} Dateien geladen …`;
+    if (chunks.length > 1) $("stunden-text").textContent = tx(`${nr(fertig)} von ${nr(chunks.length)} Dateien geladen …`, `${nr(fertig)} of ${nr(chunks.length)} files loaded …`);
   };
   zeige();
   const holen = (chunk) => {
@@ -2372,7 +2480,7 @@ async function ladeStunden(stellen) {
   await Promise.all(Array.from({ length: Math.min(4, chunks.length) }, arbeiter));
   // der Chunk hält nur, was er kennt; eine Stelle ohne Eintrag bekommt null
   for (const s of fehlt) if (!state.stunden.has(s.id) && state.chunks.has(s.chunk)) state.stunden.set(s.id, null);
-  if (fehler) $("stunden-text").textContent = `${de(fehler)} Datei${fehler === 1 ? "" : "en"} ließen sich nicht laden.`;
+  if (fehler) $("stunden-text").textContent = tx(`${nr(fehler)} Datei${fehler === 1 ? " ließ" : "en ließen"} sich nicht laden.`, `${nr(fehler)} file${fehler === 1 ? "" : "s"} could not be loaded.`);
   mittleAlle();
   return fehler === 0;
 }
@@ -2385,10 +2493,10 @@ function genutzteStellen(familie = "dauer") {
 async function ladeAlleStunden() {
   const stellen = genutzteStellen();
   $("stunden-laden").disabled = true;
-  setStatus(`Stundenwerte von ${de(stellen.length)} Stellen laden …`);
+  setStatus(tx(`Stundenwerte von ${nr(stellen.length)} Stellen laden …`, `Loading hourly values of ${nr(stellen.length)} sites …`));
   const ok = await ladeStunden(stellen);
   $("stunden-laden").disabled = false;
-  setStatus(ok ? "Stundenwerte geladen." : "Nicht alle Stundenwerte ließen sich laden.", ok ? "done" : "error");
+  setStatus(() => (ok ? tx("Stundenwerte geladen.", "Hourly values loaded.") : tx("Nicht alle Stundenwerte ließen sich laden.", "Not all hourly values could be loaded.")), ok ? "done" : "error");
   renderMittelRahmen();
   renderAlles();
 }
@@ -2401,7 +2509,7 @@ function renderMittelRahmen() {
     const b = document.createElement("button");
     b.type = "button";
     b.value = String(w.nr);
-    b.textContent = w.kurz;
+    b.textContent = tx(w.kurz, w.en);
     b.setAttribute("aria-pressed", String(m.wochentage.includes(w.nr)));
     return b;
   }));
@@ -2420,13 +2528,13 @@ function renderMittelRahmen() {
     if (!$("jahr").value) $("jahr").value = String(new Date(max * 86400000).getUTCFullYear());
   }
   $("zeitraum-text").innerHTML = quellen.length
-    ? `Stundenwerte hat die Zählkarte für die jüngsten 12 Monate: ${quellen.map((q) => `${esc(q.name)} ${esc(q.stundenVon)} bis ${esc(q.bis)}`).join("; ")}. Ohne Angabe gilt der ganze Zeitraum.`
+    ? tx(`Stundenwerte hat die Zählkarte für die jüngsten 12 Monate: ${quellen.map((q) => `${esc(q.name)} ${esc(q.stundenVon)} bis ${esc(q.bis)}`).join("; ")}. Ohne Angabe gilt der ganze Zeitraum.`, `The Zählkarte has hourly values for the latest 12 months: ${quellen.map((q) => `${esc(q.name)} ${esc(q.stundenVon)} to ${esc(q.bis)}`).join("; ")}. Without dates, the whole period applies.`)
     : "";
   const fehlt = genutzteStellen().filter((s) => !state.stunden.has(s.id)).length;
   $("laden-row").hidden = fehlt === 0;
   if (fehlt) {
     const chunks = new Set(genutzteStellen().filter((s) => !state.stunden.has(s.id)).map((s) => s.chunk)).size;
-    $("stunden-laden").textContent = `Stundenwerte laden (${de(fehlt)} Stellen, ${de(chunks)} Datei${chunks === 1 ? "" : "en"})`;
+    $("stunden-laden").textContent = tx(`Stundenwerte laden (${nr(fehlt)} Stellen, ${nr(chunks)} Datei${chunks === 1 ? "" : "en"})`, `Load hourly values (${anzahl(fehlt, "site", "sites")}, ${anzahl(chunks, "file", "files")})`);
   }
 }
 
@@ -2441,9 +2549,9 @@ function leseMittelForm() {
 $("wochentage").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  const nr = Number(b.value);
+  const tag = Number(b.value);
   const w = state.mittel.wochentage;
-  state.mittel.wochentage = w.includes(nr) ? w.filter((x) => x !== nr) : [...w, nr];
+  state.mittel.wochentage = w.includes(tag) ? w.filter((x) => x !== tag) : [...w, tag];
   renderMittelRahmen();
   mittleAlle();
   renderAlles();
@@ -2488,7 +2596,10 @@ function mittleAlle() {
   }
   const t = $("mittel-text");
   t.hidden = state.ergebnisMittel.size === 0;
-  t.textContent = `${auswahlText(state.mittel)}. ${de(mitWerten)} Stellen mit Werten${unvollstaendig ? `, davon ${de(unvollstaendig)} nicht in allen Stunden` : ""}${ohneWerte ? `; ${de(ohneWerte)} ohne Werte in dieser Auswahl` : ""}.`;
+  t.textContent = tx(
+    `${auswahlText(state.mittel)}. ${nr(mitWerten)} Stellen mit Werten${unvollstaendig ? `, davon ${nr(unvollstaendig)} nicht in allen Stunden` : ""}${ohneWerte ? `; ${nr(ohneWerte)} ohne Werte in dieser Auswahl` : ""}.`,
+    `${auswahlText(state.mittel, "en")}. ${anzahl(mitWerten, "site", "sites")} with values${unvollstaendig ? `, ${nr(unvollstaendig)} of them not in all hours` : ""}${ohneWerte ? `; ${nr(ohneWerte)} without values in this selection` : ""}.`,
+  );
 }
 
 // ---------- Ausgeben ----------
@@ -2587,7 +2698,7 @@ function baueCounts() {
         ["quelle", q.code],
         ["lizenz", q.lizenzen.map((l) => l.lizenz).join(", ")],
         ["abschnitt", s.abschnitt],
-        ["richtung", richtungsText(s)],
+        ["richtung", s.richtungText || ""],
         ["abstand_m", link.d != null ? Math.round(link.d * 10) / 10 : null, "java.lang.Double"],
         ["abweichung_grad", link.abweichung != null ? Math.round(link.abweichung) : null],
         ["zuordnung", e?.link ? "geprüft" : "automatisch"],
@@ -2684,7 +2795,7 @@ function baueKurzCounts() {
         ["stelle", p.stelle],
         ["zaehlung", p.kennung],
         ["datum", p.datum],
-        ["wochentag", WOCHENTAG_KURZ[wochentag(tagNr(p.datum))]],
+        ["wochentag", WOCHENTAG_KURZ.de[wochentag(tagNr(p.datum))]],
         ["tagtyp", TAGTYP[p.tag ?? "u"]],
         ["fenster", p.fenster],
         ["art", p.art === "knoten" ? "Knoten" : "Querschnitt"],
@@ -2749,22 +2860,24 @@ function renderExport() {
   const t = $("export-text");
   const teile = [];
   const nurGeprueft = $("nur-geprueft").checked;
-  if (dauerDa) teile.push(`${de(genutzt.length)} Dauerzählstellen mit Link gehen in die counts.xml${nurGeprueft ? " (nur geprüfte)" : ""}${offen("dauer") && !nurGeprueft ? `, ${de(offen("dauer"))} davon noch nicht geprüft` : ""}.`);
-  if (kurzDa) teile.push(`${de(kurze.length)} Kurzzeit-Punkte mit Link gehen in die counts-kurzzeit.xml${nurGeprueft ? " (nur geprüfte)" : ""}${offen("kurz") && !nurGeprueft ? `, ${de(offen("kurz"))} davon noch nicht geprüft` : ""}.`);
-  if (fehlt) teile.push(`Für ${de(fehlt)} Dauerzählstellen fehlen noch die Stundenwerte; die Knöpfe laden sie vorher.`);
+  const nurText = nurGeprueft ? tx(" (nur geprüfte)", " (reviewed only)") : "";
+  const offenText = (familie) => (offen(familie) && !nurGeprueft ? tx(`, ${nr(offen(familie))} davon noch nicht geprüft`, `, ${nr(offen(familie))} of them not reviewed yet`) : "");
+  if (dauerDa) teile.push(tx(`${nr(genutzt.length)} Dauerzählstellen mit Link gehen in die counts.xml${nurText}${offenText("dauer")}.`, `${nr(genutzt.length)} permanent counters with a link go into the counts.xml${nurText}${offenText("dauer")}.`));
+  if (kurzDa) teile.push(tx(`${nr(kurze.length)} Kurzzeit-Punkte mit Link gehen in die counts-kurzzeit.xml${nurText}${offenText("kurz")}.`, `${nr(kurze.length)} short-term points with a link go into the counts-kurzzeit.xml${nurText}${offenText("kurz")}.`));
+  if (fehlt) teile.push(tx(`Für ${nr(fehlt)} Dauerzählstellen fehlen noch die Stundenwerte; die Knöpfe laden sie vorher.`, `${nr(fehlt)} permanent counters still lack hourly values; the buttons load them first.`));
   t.hidden = !teile.length;
   t.textContent = teile.join(" ");
   // Quellen und Lizenzen der Stellen, die hineingehen
   const quellen = [...new Set(genutzt.map((s) => s.quelle))].map((c) => state.daten?.quellen.get(c)).filter(Boolean);
   const eintraege = quellen.map((q) => ({ name: q.name, lizenzen: q.lizenzen, vermerk: q.quellenvermerk }));
-  for (const { quelle, lizenzen } of kurzLizenzen(kurze)) eintraege.push({ name: `${quelle.name} (Kurzzeitzählungen)`, lizenzen, vermerk: null, titel: true });
+  for (const { quelle, lizenzen } of kurzLizenzen(kurze)) eintraege.push({ name: `${quelle.name} ${tx("(Kurzzeitzählungen)", "(short-term counts)")}`, lizenzen, vermerk: null, titel: true });
   $("quellen-box").hidden = !eintraege.length;
   $("quellen").replaceChildren(...eintraege.map((q) => {
     const li = document.createElement("li");
     const einschr = q.lizenzen.some((l) => EINSCHRAENKUNG.test(l.lizenz ?? ""));
     li.className = einschr ? "einschr" : "";
     const liz = q.lizenzen.map((l) => `${lizenzLink(l)}${q.titel && l.titel ? ` <span class="v">(${esc(l.titel)})</span>` : ""}`).join(", ");
-    li.innerHTML = `<b>${esc(q.name)}</b>: ${liz}${q.vermerk ? ` <span class="v">· ${esc(q.vermerk)}</span>` : ""}${einschr ? ' <span class="v">· mit Einschränkung</span>' : ""}`;
+    li.innerHTML = `<b>${esc(q.name)}</b>: ${liz}${q.vermerk ? ` <span class="v">· ${esc(q.vermerk)}</span>` : ""}${einschr ? ` <span class="v">· ${tx("mit Einschränkung", "with restrictions")}</span>` : ""}`;
     return li;
   }));
   if (!$("counts-name").value && state.netz) $("counts-name").placeholder = `Zählkarte ${stamm()}`;
@@ -2788,7 +2901,7 @@ function speichern(name, daten, typ) {
 async function exportiere(gz) {
   const genutzt = genutzteStellen();
   if (genutzt.some((s) => !state.stunden.has(s.id))) {
-    setStatus("Stundenwerte laden …");
+    setStatus(tx("Stundenwerte laden …", "Loading hourly values …"));
     await ladeStunden(genutzt);
     renderMittelRahmen();
   }
@@ -2798,11 +2911,14 @@ async function exportiere(gz) {
     const stream = new Blob([xml]).stream().pipeThrough(new CompressionStream("gzip"));
     speichern(`${name}.gz`, await new Response(stream).arrayBuffer(), "application/gzip");
   } else speichern(name, xml, "application/xml");
-  const teile = [`${de(locations.length)} Messstellen in ${name}${gz ? ".gz" : ""}.`];
-  if (drausen.unvollstaendig) teile.push(`${de(drausen.unvollstaendig)} Tagesgänge ohne alle 24 Stunden blieben draußen.`);
-  if (drausen.ohneWerte) teile.push(`${de(drausen.ohneWerte)} ohne Werte in der Auswahl.`);
-  if (drausen.doppelterModus) teile.push(`${de(drausen.doppelterModus)}-mal zwei Gruppen mit demselben networkMode: nur die erste ging hinein.`);
-  setStatus(teile.join(" "), "done");
+  const datei = `${name}${gz ? ".gz" : ""}`;
+  setStatus(() => {
+    const teile = [tx(`${nr(locations.length)} Messstellen in ${datei}.`, `${anzahl(locations.length, "count station", "count stations")} in ${datei}.`)];
+    if (drausen.unvollstaendig) teile.push(tx(`${nr(drausen.unvollstaendig)} Tagesgänge ohne alle 24 Stunden blieben draußen.`, `${nr(drausen.unvollstaendig)} daily profiles without all 24 hours were left out.`));
+    if (drausen.ohneWerte) teile.push(tx(`${nr(drausen.ohneWerte)} ohne Werte in der Auswahl.`, `${nr(drausen.ohneWerte)} without values in the selection.`));
+    if (drausen.doppelterModus) teile.push(tx(`${nr(drausen.doppelterModus)}-mal zwei Gruppen mit demselben networkMode: nur die erste ging hinein.`, `${nr(drausen.doppelterModus)} times two groups with the same networkMode: only the first went in.`));
+    return teile.join(" ");
+  }, "done");
   renderAlles();
 }
 $("counts-xml").addEventListener("click", () => exportiere(false));
@@ -2815,9 +2931,12 @@ async function exportiereKurz(gz) {
     const stream = new Blob([xml]).stream().pipeThrough(new CompressionStream("gzip"));
     speichern(`${name}.gz`, await new Response(stream).arrayBuffer(), "application/gzip");
   } else speichern(name, xml, "application/xml");
-  const teile = [`${de(locations.length)} Messstellen aus ${de(stellen.length)} Kurzzeit-Punkten in ${name}${gz ? ".gz" : ""}.`];
-  if (drausen.doppelterModus) teile.push(`${de(drausen.doppelterModus)}-mal zwei Gruppen mit demselben networkMode an einem Link: nur die erste ging hinein.`);
-  setStatus(teile.join(" "), "done");
+  const datei = `${name}${gz ? ".gz" : ""}`;
+  setStatus(() => {
+    const teile = [tx(`${nr(locations.length)} Messstellen aus ${nr(stellen.length)} Kurzzeit-Punkten in ${datei}.`, `${anzahl(locations.length, "count station", "count stations")} from ${nr(stellen.length)} short-term points in ${datei}.`)];
+    if (drausen.doppelterModus) teile.push(tx(`${nr(drausen.doppelterModus)}-mal zwei Gruppen mit demselben networkMode an einem Link: nur die erste ging hinein.`, `${nr(drausen.doppelterModus)} times two groups with the same networkMode on one link: only the first went in.`));
+    return teile.join(" ");
+  }, "done");
 }
 $("kurz-xml").addEventListener("click", () => exportiereKurz(false));
 $("kurz-gz").addEventListener("click", () => exportiereKurz(true));
@@ -2868,7 +2987,7 @@ $("zuordnung-csv").addEventListener("click", () => {
       kommentar: e?.kommentar ?? "",
       zuordnung: lage === "aus" ? "ausgelassen" : lage === "geprueft" ? "geprüft" : link ? "automatisch" : "ohne Link",
       abstand_m: link?.d != null ? Math.round(link.d * 10) / 10 : "",
-      richtung: richtungsText(s),
+      richtung: s.richtungText || "", // die Ausgabe bleibt in jeder Sprache gleich
       name: s.name,
       quelle: s.quelle,
       anker_lon: a ? a.lon.toFixed(7) : "",
@@ -2880,7 +2999,7 @@ $("zuordnung-csv").addEventListener("click", () => {
     };
   });
   speichern(`${stamm()}-counts-zuordnung.csv`, zuordnungCsv(zeilen), "text/csv");
-  setStatus(`Zuordnung von ${de(zeilen.length)} Stellen gespeichert.`, "done");
+  setStatus(() => tx(`Zuordnung von ${nr(zeilen.length)} Stellen gespeichert.`, `Assignment of ${anzahl(zeilen.length, "site", "sites")} saved.`), "done");
 });
 
 /**
@@ -2961,7 +3080,7 @@ async function uebernimmZuordnung(zeilen, name, vorab = null) {
       } else {
         ent.link = null;
         ent.uebernommen = null;
-        ent.anker.grund = schon ? `der passende Link ${x.link.id} gehört schon zu ${state.byId.get(schon)?.name || schon}` : x?.grund ?? "unklar";
+        ent.anker.grund = schon ? tx(`der passende Link ${x.link.id} gehört schon zu ${state.byId.get(schon)?.name || schon}`, `the matching link ${x.link.id} already belongs to ${state.byId.get(schon)?.name || schon}`) : x?.grund ?? tx("unklar", "unclear");
         offen++;
       }
     }
@@ -2969,10 +3088,21 @@ async function uebernimmZuordnung(zeilen, name, vorab = null) {
   const teile = [`${name}:`];
   if (vorab) teile.push(vorab);
   const uebernommen = wie.id + wie.weg + wie.lage;
-  if (mitAnker.length) teile.push(`${de(uebernommen)} von ${anzahl(mitAnker.length, "geprüften Zuordnung", "geprüften Zuordnungen")} übernommen${uebernommen ? ` (${[[wie.id, "gleiche Link-ID"], [wie.weg, "gleicher OSM-Weg"], [wie.lage, "eindeutige Lage"]].filter(([n]) => n).map(([n, t]) => `${de(n)} ${t}`).join(", ")})` : ""}${offen ? `, ${de(offen)} zum Prüfen` : ""}.`);
-  if (gesetzt || !mitAnker.length) teile.push(`${anzahl(gesetzt, "Entscheidung", "Entscheidungen")} ${mitAnker.length ? "ohne Anker " : ""}übernommen.`);
-  if (fremd) teile.push(`${anzahl(fremd, "Station gehört", "Stationen gehören")} nicht zur Auswahl${fremdKurz ? ` (${anzahl(fremdKurz, "Kurzzeit-Punkt", "Kurzzeit-Punkte")}${state.kurz.an ? ", etwa aus anderen Jahren oder einer anderen Auswahl" : "; die Kurzzeitzählungen sind aus"})` : ""}.`);
-  if (ohneLink) teile.push(`${anzahl(ohneLink, "Link fehlt", "Links fehlen")} im Netz.`);
+  const wieTeile = [[wie.id, tx("gleiche Link-ID", "same link ID")], [wie.weg, tx("gleicher OSM-Weg", "same OSM way")], [wie.lage, tx("eindeutige Lage", "unique location")]].filter(([n]) => n).map(([n, t]) => `${nr(n)} ${t}`).join(", ");
+  if (mitAnker.length) {
+    teile.push(tx(
+      `${nr(uebernommen)} von ${anzahl(mitAnker.length, "geprüften Zuordnung", "geprüften Zuordnungen")} übernommen${uebernommen ? ` (${wieTeile})` : ""}${offen ? `, ${nr(offen)} zum Prüfen` : ""}.`,
+      `${nr(uebernommen)} of ${anzahl(mitAnker.length, "reviewed assignment", "reviewed assignments")} transferred${uebernommen ? ` (${wieTeile})` : ""}${offen ? `, ${nr(offen)} to review` : ""}.`,
+    ));
+  }
+  if (gesetzt || !mitAnker.length) teile.push(tx(`${anzahl(gesetzt, "Entscheidung", "Entscheidungen")} ${mitAnker.length ? "ohne Anker " : ""}übernommen.`, `${anzahl(gesetzt, "decision", "decisions")} ${mitAnker.length ? "without an anchor " : ""}transferred.`));
+  if (fremd) {
+    teile.push(tx(
+      `${anzahl(fremd, "Station gehört", "Stationen gehören")} nicht zur Auswahl${fremdKurz ? ` (${anzahl(fremdKurz, "Kurzzeit-Punkt", "Kurzzeit-Punkte")}${state.kurz.an ? ", etwa aus anderen Jahren oder einer anderen Auswahl" : "; die Kurzzeitzählungen sind aus"})` : ""}.`,
+      `${anzahl(fremd, "station is", "stations are")} not in the selection${fremdKurz ? ` (${anzahl(fremdKurz, "short-term point", "short-term points")}${state.kurz.an ? ", e.g. from other years or another selection" : "; the short-term counts are off"})` : ""}.`,
+    ));
+  }
+  if (ohneLink) teile.push(tx(`${anzahl(ohneLink, "Link fehlt", "Links fehlen")} im Netz.`, `${anzahl(ohneLink, "link is", "links are")} missing in the network.`));
   if (mitAnker.length) {
     // die offenen suchen jetzt vom Anker aus
     speichere();
@@ -3015,10 +3145,14 @@ function gebietAusFeature(f) {
   return baueGebiet({ name: p.name ?? "Gebiet", art: p.art === "gezeichnet" ? "gezeichnet" : "datei", datei: p.datei ?? null, polygone: leseGeojson(f).polygone, vereinfachen: false });
 }
 
+// Der Name geht in counts.xml und Konfiguration und bleibt darum deutsch; die Oberfläche übersetzt ihn
+const GEZEICHNET = "Gezeichnetes Gebiet";
+const gebietName = (g) => (g.name === GEZEICHNET ? tx(GEZEICHNET, "Drawn area") : g.name);
 const gebietEditierbar = () => !state.zeichnen && state.gebiet?.art === "gezeichnet" && state.gebiet.polygone.length === 1 && state.gebiet.polygone[0].length === 1;
 const gebietText = () => {
   const g = state.gebiet;
-  return g ? `${g.name} (${g.art === "gezeichnet" ? "gezeichnet" : g.datei ?? "Datei"}), ${de(g.flaeche_km2, 1)} km²; nur Stellen darin` : null;
+  // geht in die Ausgaben: deutsch in jeder Sprache der Oberfläche
+  return g ? `${g.name} (${g.art === "gezeichnet" ? "gezeichnet" : g.datei ?? "Datei"}), ${nrAusgabe(g.flaeche_km2, 1)} km²; nur Stellen darin` : null;
 };
 
 /** Das Gebiet setzen oder mit null aufheben: merken, zeichnen und die Stellen neu wählen. */
@@ -3069,24 +3203,34 @@ function zeichneGebiet(ring = null) {
 function renderGebiet() {
   const g = state.gebiet;
   const z = state.zeichnen;
-  $("gebiet-zeichnen").textContent = z ? "Zeichnen abbrechen" : g ? "Neu zeichnen" : "Zeichnen";
+  $("gebiet-zeichnen").textContent = z ? tx("Zeichnen abbrechen", "Cancel drawing") : g ? tx("Neu zeichnen", "Redraw") : tx("Zeichnen", "Draw");
   $("gebiet-zeichnen").setAttribute("aria-pressed", String(Boolean(z)));
   $("gebiet-weg").hidden = !g || Boolean(z);
   $("gebiet-zeigen").hidden = !g || Boolean(z);
   const t = $("gebiet-text");
   if (z) {
-    t.textContent = `${anzahl(z.punkte.length, "Ecke", "Ecken")} gesetzt. ${z.punkte.length >= 3 ? "Doppelklick, Enter oder ein Klick auf die erste Ecke schließt das Gebiet." : "Klicke die Ecken des Gebiets auf der Karte."}`;
+    t.textContent = tx(
+      `${anzahl(z.punkte.length, "Ecke", "Ecken")} gesetzt. ${z.punkte.length >= 3 ? "Doppelklick, Enter oder ein Klick auf die erste Ecke schließt das Gebiet." : "Klicke die Ecken des Gebiets auf der Karte."}`,
+      `${anzahl(z.punkte.length, "corner", "corners")} set. ${z.punkte.length >= 3 ? "Double-click, Enter or a click on the first corner closes the area." : "Click the corners of the area on the map."}`,
+    );
     return;
   }
   if (!g) {
-    t.innerHTML = "Es zählen alle Stellen im Rechteck um die Links des Netzes. Ein Gebiet lässt sich auf der Karte zeichnen oder laden: GeoJSON, <code>.poly</code> wie für <code>osmium extract -p</code> oder ein Shapefile, gezippt oder als <code>.shp</code> mit <code>.prj</code>.";
+    t.innerHTML = tx(
+      "Es zählen alle Stellen im Rechteck um die Links des Netzes. Ein Gebiet lässt sich auf der Karte zeichnen oder laden: GeoJSON, <code>.poly</code> wie für <code>osmium extract -p</code> oder ein Shapefile, gezippt oder als <code>.shp</code> mit <code>.prj</code>.",
+      "All sites in the rectangle around the network's links count. An area can be drawn on the map or loaded: GeoJSON, <code>.poly</code> as for <code>osmium extract -p</code>, or a shapefile, zipped or as <code>.shp</code> with <code>.prj</code>.",
+    );
     return;
   }
   const bbox = state.netz?.info?.bbox;
   const draussen = bbox && !ueberschneidet(g, bbox);
-  const wie = g.art === "gezeichnet" ? "gezeichnet" : `aus ${esc(g.datei ?? "einer Datei")}`;
-  const flaechen = g.polygone.length > 1 ? `${anzahl(g.polygone.length, "Fläche", "Flächen")}, ` : "";
-  t.innerHTML = `<strong>${esc(g.name)}</strong> (${wie}): ${flaechen}${de(g.flaeche_km2, g.flaeche_km2 < 10 ? 1 : 0)} km²${g.vereinfacht ? `, auf ${de(VEREINFACHT_M)} m genau vereinfacht (${de(g.punkte)} Punkte)` : ""}. Es zählen nur die Stellen darin.${gebietEditierbar() ? " Die Ecken lassen sich auf der Karte verschieben." : ""}${gebietHinweis ? ` ${esc(gebietHinweis)}` : ""}${draussen ? " <strong>Das Gebiet liegt nicht im Netz.</strong>" : ""}`;
+  const wie = g.art === "gezeichnet" ? tx("gezeichnet", "drawn") : tx(`aus ${esc(g.datei ?? "einer Datei")}`, `from ${esc(g.datei ?? "a file")}`);
+  const flaechen = g.polygone.length > 1 ? `${tx(anzahl(g.polygone.length, "Fläche", "Flächen"), anzahl(g.polygone.length, "polygon", "polygons"))}, ` : "";
+  const km2 = `${nr(g.flaeche_km2, g.flaeche_km2 < 10 ? 1 : 0)} km²`;
+  t.innerHTML = tx(
+    `<strong>${esc(gebietName(g))}</strong> (${wie}): ${flaechen}${km2}${g.vereinfacht ? `, auf ${nr(VEREINFACHT_M)} m genau vereinfacht (${nr(g.punkte)} Punkte)` : ""}. Es zählen nur die Stellen darin.${gebietEditierbar() ? " Die Ecken lassen sich auf der Karte verschieben." : ""}${gebietHinweis ? ` ${esc(gebietHinweis)}` : ""}${draussen ? " <strong>Das Gebiet liegt nicht im Netz.</strong>" : ""}`,
+    `<strong>${esc(gebietName(g))}</strong> (${wie}): ${flaechen}${km2}${g.vereinfacht ? `, simplified to ${nr(VEREINFACHT_M)} m (${nr(g.punkte)} points)` : ""}. Only the sites inside count.${gebietEditierbar() ? " The corners can be moved on the map." : ""}${gebietHinweis ? ` ${esc(gebietHinweis)}` : ""}${draussen ? " <strong>The area is not within the network.</strong>" : ""}`,
+  );
 }
 
 function zeichneStart() {
@@ -3110,9 +3254,9 @@ function zeichneEnde(fertig) {
   setTimeout(() => map.doubleClickZoom.enable(), 0);
   if (fertig && z.punkte.length >= 3) {
     try {
-      return setzeGebiet(baueGebiet({ name: "Gezeichnetes Gebiet", art: "gezeichnet", polygone: [[z.punkte]] }));
+      return setzeGebiet(baueGebiet({ name: GEZEICHNET, art: "gezeichnet", polygone: [[z.punkte]] }));
     } catch (err) {
-      setStatus(`Gebiet: ${err.message}`, "error");
+      setStatus(tx(`Gebiet: ${err.message}`, `Area: ${err.message}`), "error");
     }
   }
   zeichneGebiet();
@@ -3155,7 +3299,7 @@ map.on("mouseup", () => {
   try {
     setzeGebiet(baueGebiet({ name: state.gebiet.name, art: "gezeichnet", polygone: [[ring]] }));
   } catch (err) {
-    setStatus(`Gebiet: ${err.message}`, "error");
+    setStatus(tx(`Gebiet: ${err.message}`, `Area: ${err.message}`), "error");
     zeichneGebiet();
   }
 });
@@ -3179,7 +3323,7 @@ async function nimmGebietDateien(files, { waehlen = true } = {}) {
     if (zip) {
       const dateien = await leseZip(new Uint8Array(await zip.arrayBuffer()), (n) => /\.(shp|prj)$/i.test(n));
       const shpName = [...dateien.keys()].find((n) => /\.shp$/i.test(n));
-      if (!shpName) throw new Error("In der ZIP-Datei ist kein Shapefile (.shp).");
+      if (!shpName) throw new Error(tx("In der ZIP-Datei ist kein Shapefile (.shp).", "There is no shapefile (.shp) in the ZIP file."));
       polygone = leseShp(dateien.get(shpName));
       const prj = dateien.get(shpName.replace(/\.shp$/i, ".prj")) ?? [...dateien].find(([n]) => /\.prj$/i.test(n))?.[1];
       crs = prj ? crsAusPrj(new TextDecoder().decode(prj)) : null;
@@ -3198,29 +3342,29 @@ async function nimmGebietDateien(files, { waehlen = true } = {}) {
       try {
         roh = JSON.parse(await json.text());
       } catch {
-        throw new Error("Die Datei ist kein JSON.");
+        throw new Error(tx("Die Datei ist kein JSON.", "The file is not JSON."));
       }
       const r = leseGeojson(roh);
       polygone = r.polygone;
       crs = r.crs;
       name = r.name ?? stammVon(json.name);
     } else {
-      throw new Error("Erwartet wird GeoJSON, eine .poly-Datei oder ein Shapefile (.zip oder .shp mit .prj).");
+      throw new Error(tx("Erwartet wird GeoJSON, eine .poly-Datei oder ein Shapefile (.zip oder .shp mit .prj).", "Expected GeoJSON, a .poly file or a shapefile (.zip, or .shp with .prj)."));
     }
-    if (!polygone.length) throw new Error("Darin ist keine Fläche.");
+    if (!polygone.length) throw new Error(tx("Darin ist keine Fläche.", "It contains no polygon."));
     let hinweis = "";
     if (crs && /^EPSG:4326$/i.test(crs)) crs = null;
     if (crs || !siehtNachGradAus(polygone)) {
       if (!crs) {
         crs = state.netz?.info?.osm ? $("crs").value.trim() : state.netz?.info?.crs ?? $("crs").value.trim();
-        hinweis = `Die Datei nennt kein Koordinatensystem; gelesen als ${crs}.`;
+        hinweis = tx(`Die Datei nennt kein Koordinatensystem; gelesen als ${crs}.`, `The file names no coordinate system; read as ${crs}.`);
       }
       const { projektion } = await import("./lib/crs.js");
       let p;
       try {
         p = projektion(crs);
       } catch (err) {
-        throw new Error(`Das Koordinatensystem der Datei kennt die Seite nicht (${err.message})`);
+        throw new Error(tx(`Das Koordinatensystem der Datei kennt die Seite nicht (${err.message})`, `The page does not know the file's coordinate system (${err.message})`));
       }
       polygone = umrechnen(polygone, p.zuWgs);
     }
@@ -3228,7 +3372,7 @@ async function nimmGebietDateien(files, { waehlen = true } = {}) {
     setzeGebiet(g, { hinweis, einpassen: true, waehlen });
     return true;
   } catch (err) {
-    setStatus(`Gebiet aus ${datei}: ${err.message}`, "error");
+    setStatus(tx(`Gebiet aus ${datei}: ${err.message}`, `Area from ${datei}: ${err.message}`), "error");
     return false;
   }
 }
@@ -3335,7 +3479,7 @@ function entscheidungenJetzt() {
       anker: link ? ankerVon(s) : null,
       osmWeg: link?.weg ?? null,
       name: s.name,
-      richtung: richtungsText(s),
+      richtung: s.richtungText || "", // die Konfiguration bleibt in jeder Sprache gleich
       uebernommen: link && e.uebernommen ? { wie: e.uebernommen.wie, netz: e.uebernommen.netz } : null,
     }));
   }
@@ -3370,7 +3514,10 @@ $("konfig-json").addEventListener("click", () => {
   speichern(`${stamm()}-snapper-konfiguration.json`, `${JSON.stringify(k, null, 2)}\n`, "application/json");
   const hand = k.entscheidungen.filter((e) => e.zuordnung !== "automatisch").length;
   const kommentare = k.entscheidungen.length - hand;
-  setStatus(`Konfiguration gespeichert: Netz, Datenstand, Einstellungen und ${anzahl(hand, "Entscheidung", "Entscheidungen")} von Hand${kommentare ? `, dazu ${anzahl(kommentare, "Kommentar", "Kommentare")}` : ""}.`, "done");
+  setStatus(() => tx(
+    `Konfiguration gespeichert: Netz, Datenstand, Einstellungen und ${anzahl(hand, "Entscheidung", "Entscheidungen")} von Hand${kommentare ? `, dazu ${anzahl(kommentare, "Kommentar", "Kommentare")}` : ""}.`,
+    `Configuration saved: network, data version, settings and ${anzahl(hand, "decision", "decisions")} by hand${kommentare ? `, plus ${anzahl(kommentare, "comment", "comments")}` : ""}.`,
+  ), "done");
 });
 
 /** Dasselbe Netz: gleicher Name und gleich viele Links. */
@@ -3396,7 +3543,7 @@ function wendeEinstellungenAn(e, { crs = true, osm = true } = {}) {
   } catch {
     g = null;
   }
-  setzeGebiet(g, { waehlen: false, hinweis: e.gebiet && !g ? "Das Gebiet der Konfiguration ließ sich nicht lesen; es gilt das ganze Netz." : "" });
+  setzeGebiet(g, { waehlen: false, hinweis: e.gebiet && !g ? tx("Das Gebiet der Konfiguration ließ sich nicht lesen; es gilt das ganze Netz.", "The configuration's area could not be read; the whole network applies.") : "" });
   if (e.suche) {
     if (zahl(e.suche.radius_m)) $("radius").value = String(zahl(e.suche.radius_m));
     if (zahl(e.suche.max_winkel_grad)) $("winkel").value = String(zahl(e.suche.max_winkel_grad));
@@ -3468,9 +3615,9 @@ async function uebernimmAusstehende() {
     const key = speicherSchluessel();
     if (gemerkt && key) store.set(key, JSON.stringify(gespeichert));
   }
-  const teile = [a.zeilen.length ? await uebernimmZuordnung(a.zeilen, a.name, "Einstellungen übernommen.") : `${a.name}: Einstellungen übernommen, keine Entscheidungen von Hand.`];
-  if (gemerkt) teile.push(`${anzahl(gemerkt, "weitere Entscheidung", "weitere Entscheidungen")} für Stellen außerhalb der Auswahl gemerkt.`);
-  if (a.netz?.name && !gleich) teile.push(`Die Konfiguration stammt von ${a.netz.name}${a.netz.art === "osm" ? " (OSM-Auszug)" : ""}.`);
+  const teile = [a.zeilen.length ? await uebernimmZuordnung(a.zeilen, a.name, tx("Einstellungen übernommen.", "Settings applied.")) : tx(`${a.name}: Einstellungen übernommen, keine Entscheidungen von Hand.`, `${a.name}: settings applied, no decisions by hand.`)];
+  if (gemerkt) teile.push(tx(`${anzahl(gemerkt, "weitere Entscheidung", "weitere Entscheidungen")} für Stellen außerhalb der Auswahl gemerkt.`, `${anzahl(gemerkt, "further decision", "further decisions")} kept for sites outside the selection.`));
+  if (a.netz?.name && !gleich) teile.push(tx(`Die Konfiguration stammt von ${a.netz.name}${a.netz.art === "osm" ? " (OSM-Auszug)" : ""}.`, `The configuration comes from ${a.netz.name}${a.netz.art === "osm" ? " (OSM extract)" : ""}.`));
   setStatus(teile.join(" "), "done");
 }
 
@@ -3485,7 +3632,7 @@ async function nimmKonfiguration(file, netzDabei = false) {
     try {
       json = JSON.parse(await file.text());
     } catch {
-      throw new Error("Die Datei ist kein JSON.");
+      throw new Error(tx("Die Datei ist kein JSON.", "The file is not JSON."));
     }
     if (!json?.format && ["FeatureCollection", "Feature", "Polygon", "MultiPolygon", "GeometryCollection"].includes(json?.type)) return nimmGebietDateien([file], { waehlen: !netzDabei });
     k = leseKonfiguration(json);
@@ -3512,11 +3659,17 @@ async function nimmKonfiguration(file, netzDabei = false) {
   } else if (k.netz?.beispiel) {
     await ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true });
   } else if (k.netz?.url) {
-    setStatus(`${file.name}: Einstellungen übernommen, ${k.netz.name ?? "das Netz"} wird geladen …`, "busy");
+    setStatus(tx(`${file.name}: Einstellungen übernommen, ${k.netz.name ?? "das Netz"} wird geladen …`, `${file.name}: settings applied, loading ${k.netz.name ?? "the network"} …`), "busy");
     await ladeNetzVonUrl({ net: k.netz.url, geo: k.netz.geometrien_url ?? (k.netz.geometrien ? "auto" : "0") });
   } else {
-    const wo = k.netz?.name ? ` (in der Konfiguration: ${k.netz.name})` : "";
-    setStatus(`${file.name}: Einstellungen übernommen. ${k.zeilen.length ? `${k.zeilen.length === 1 ? "Die Entscheidung kommt" : `Die ${de(k.zeilen.length)} Entscheidungen kommen`}, sobald ein Netz geladen ist${wo}.` : `Jetzt ein Netz laden${wo}.`}`, "idle");
+    setStatus(() => {
+      if (sprache() === "de") {
+        const wo = k.netz?.name ? ` (in der Konfiguration: ${k.netz.name})` : "";
+        return `${file.name}: Einstellungen übernommen. ${k.zeilen.length ? `${k.zeilen.length === 1 ? "Die Entscheidung kommt" : `Die ${nr(k.zeilen.length)} Entscheidungen kommen`}, sobald ein Netz geladen ist${wo}.` : `Jetzt ein Netz laden${wo}.`}`;
+      }
+      const wo = k.netz?.name ? ` (in the configuration: ${k.netz.name})` : "";
+      return `${file.name}: settings applied. ${k.zeilen.length ? `${k.zeilen.length === 1 ? "The decision is applied" : `The ${nr(k.zeilen.length)} decisions are applied`} once a network is loaded${wo}.` : `Now load a network${wo}.`}`;
+    }, "idle");
   }
   return true;
 }
@@ -3527,7 +3680,52 @@ $("konfig-file").addEventListener("change", (ev) => {
   if (file) nimmKonfiguration(file);
 });
 
+// ---------- Sprache ----------
+// Feste Texte stehen in index.html in beiden Sprachen (data-en, data-de; das CSS zeigt die der Seite),
+// übersetzte Attribute als data-de-title & Co. Was app.js schreibt, zeichnet renderSprache neu.
+const SPRACH_ATTRIBUTE = ["title", "aria-label", "placeholder", "content"];
+function attributeSprache() {
+  for (const a of SPRACH_ATTRIBUTE) {
+    for (const el of document.querySelectorAll(`[data-de-${a}]`)) {
+      if (!el.hasAttribute(`data-en-${a}`)) el.setAttribute(`data-en-${a}`, el.getAttribute(a) ?? "");
+      el.setAttribute(a, el.getAttribute(`data-${sprache()}-${a}`));
+    }
+  }
+}
+function renderSprachwahl() {
+  for (const b of $("sprache").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.value === sprache()));
+}
+/** Nach dem Wechsel: alles, was app.js geschrieben hat, in der neuen Sprache; nichts wird neu geladen. */
+function renderSprache() {
+  document.documentElement.lang = sprache();
+  attributeSprache();
+  renderSprachwahl();
+  renderOsmFilter();
+  renderQuelle(state.netz);
+  renderKurz();
+  renderGebiet();
+  renderMittelRahmen();
+  mittleAlle();
+  renderAuswahl();
+  renderGruppen();
+  renderAlles();
+  if (svn.url) renderSvn();
+  if (!$("basemap-error").hidden) basemapNichtDa();
+  popup?.remove();
+  if (letzterStatus) setStatus(letzterStatus.text, letzterStatus.kind, letzterStatus.pct);
+  updateLink();
+}
+$("sprache").addEventListener("click", (e) => {
+  const b = e.target.closest("button[value]");
+  if (!b || b.value === sprache()) return;
+  setzeSprache(b.value);
+  store.set("snapper.sprache", sprache());
+  renderSprache();
+});
+
 // ---------- Start ----------
+attributeSprache();
+renderSprachwahl();
 try {
   const g = JSON.parse(store.get("snapper.gruppen") ?? "null");
   if (g) for (const k of GRUPPEN) if (g[k]) Object.assign(state.gruppen[k], g[k]);
@@ -3563,7 +3761,7 @@ if (netParam) {
     url = null;
   }
   if (url) ladeNetzVonUrl({ net: url, geo: params.get("geo") ?? "auto" });
-  else setStatus("Der Parameter net ist keine gültige Adresse.", "error");
+  else setStatus(() => tx("Der Parameter net ist keine gültige Adresse.", "The net parameter is not a valid address."), "error");
 } else {
   ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true });
 }

@@ -4,6 +4,10 @@ import assert from "node:assert/strict";
 import { shp, zip } from "./hilfen/dateien.mjs";
 import { baueGebiet, imGebiet, inRing, flaeche, gebietGeojson, leseGeojson, lesePoly, leseShp, leseZip, crsAusPrj, siehtNachGradAus, umrechnen, ueberschneidet, MAX_PUNKTE } from "../lib/gebiet.js";
 import { projektion } from "../lib/crs.js";
+import { setzeSprache } from "../lib/sprache.js";
+
+// Die Bausteine sprechen hier Deutsch; Englisch prüft sprache.test.mjs
+setzeSprache("de");
 
 // ein Quadrat um den Alexanderplatz, etwa 1 km Kante, mit einem Loch in der Mitte
 const LON = 13.4132;

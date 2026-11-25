@@ -9,6 +9,10 @@ import { LinkIndex, kandidaten, verteile, naechsterPunkt, namePasst, erlaubt } f
 import { leseIndex, tagArt, tagNr, isoTag, wochentag, leseStunden } from "../lib/zaehlkarte.js";
 import { mittle, tagGilt, aggregatText, auswahlText, zeitraum, VORGABE } from "../lib/mitteln.js";
 import { countsXml, zuordnungCsv, leseZuordnungCsv, zahl } from "../lib/counts.js";
+import { setzeSprache } from "../lib/sprache.js";
+
+// Die Bausteine sprechen hier Deutsch; Englisch prüft sprache.test.mjs
+setzeSprache("de");
 
 const bytes = (s) => new TextEncoder().encode(s);
 async function gzip(s) {
