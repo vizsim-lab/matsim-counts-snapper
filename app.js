@@ -12,6 +12,7 @@ import { VORGABE as MITTEL_VORGABE, WOCHENTAGE, mittle, aggregatText, auswahlTex
 import { countsXml, zuordnungCsv, leseZuordnungCsv } from "./lib/counts.js";
 import { OSM_FILTER } from "./lib/osm.js";
 import { baueKonfiguration, leseKonfiguration, entscheidung as konfigEntscheidung } from "./lib/konfig.js";
+import { baueGebiet, imGebiet as punktImGebiet, gebietGeojson, leseGeojson, lesePoly, leseShp, leseZip, crsAusPrj, siehtNachGradAus, umrechnen, ueberschneidet, VEREINFACHT_M } from "./lib/gebiet.js";
 import { STROEME_VERTRAG, KURZ_GRUPPEN, KURZ_VORGABE, TAGTYP, leseManifest, leseStellen, stroemePfad, waehleZaehlungen, punkte as kurzPunkte, lizenzenVon } from "./lib/kurzzeit.js";
 
 const $ = (id) => document.getElementById(id);
@@ -80,6 +81,8 @@ const state = {
   suchToken: 0,
   ladeNr: 0, // das jüngste Netz gewinnt, wenn zwei gleichzeitig gelesen werden
   familie: "alle", // Filter der Liste: alle, dauer, kurz
+  gebiet: null, // nur Stellen darin (lib/gebiet.js); null: das ganze Netz
+  zeichnen: null, // { punkte, zeiger }, solange ein Gebiet gezeichnet wird
   // Kurzzeitzählungen: Einstellungen, Daten der Zählkarte (manifest.json, index.json, stroeme/…)
   kurz: {
     an: false,
@@ -172,8 +175,10 @@ function pfeilBild(richtung) {
 const lageFarbe = () => ["match", ["get", "lage"], ...LAGEN.flatMap((l) => [l, css(LAGE_FARBE[l])]), css("--st-aus")];
 const netzFarbe = () => (basemap === "dark" ? "#7d8a9c" : basemap === "positron" ? "#5f6b79" : css("--muted"));
 const halo = () => (basemap === "dark" ? "#0c0c0c" : basemap === "positron" ? "#ffffff" : css("--map-bg"));
+const maskeFarbe = () => (basemap === "dark" || darkScheme.matches ? "#000000" : "#1b2430");
+const maskeDeckung = () => (basemap === "dark" || darkScheme.matches ? 0.38 : 0.16);
 
-const EIGENE = ["kandidaten-linie", "zuordnung-linie", "zuordnung-pfeil", "auswahl-linie", "schnapp-linie", "kandidaten-rang", "arme-linie", "stellen-kreis", "stellen-pfeil", "auswahl-kreis", "auswahl-pfeil"];
+const EIGENE = ["gebiet-maske", "gebiet-rand", "gebiet-entwurf", "gebiet-ecken", "kandidaten-linie", "zuordnung-linie", "zuordnung-pfeil", "auswahl-linie", "schnapp-linie", "kandidaten-rang", "arme-linie", "stellen-kreis", "stellen-pfeil", "auswahl-kreis", "auswahl-pfeil"];
 // Kurzzeit-Punkte als Ring (innen der Hintergrund), Dauerzählstellen gefüllt; die gewählte Stelle immer gefüllt
 const istKurz = ["==", ["get", "kurz"], 1];
 const istSel = ["==", ["get", "sel"], 1];
@@ -223,6 +228,8 @@ function zeichneEbenen() {
   quelle("arme");
   quelle("stellen");
   quelle("auswahl");
+  quelle("gebiet");
+  quelle("gebiet-ecken");
   // die Karte zeigt neue Daten, sobald sie gezeichnet werden
   gezeichnet = -1;
   const add = (layer, before) => { if (!map.getLayer(layer.id)) map.addLayer(layer, before); };
@@ -230,6 +237,11 @@ function zeichneEbenen() {
   const kreis = { paint: { "circle-color": kreisFarbe(), "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, ["case", istSel, 6, istKurz, 2.5, 3.5], 15, ["case", istSel, 11, istKurz, 6, 7]], "circle-stroke-color": kreisRand(), "circle-stroke-width": ["case", istSel, 2.5, istKurz, 2, 1.2] } };
   const pfeil = { minzoom: 12, layout: { "icon-image": "nord", "icon-rotate": ["get", "grad"], "icon-rotation-alignment": "map", "icon-size": ["interpolate", ["linear"], ["zoom"], 12, 0.3, 16, 0.5], "icon-allow-overlap": true, "icon-ignore-placement": true }, paint: { "icon-color": pfeilFarbe() } };
   const istPunkt = ["==", ["geometry-type"], "Point"];
+  // das Gebiet: draußen abgedunkelt, darüber sein Rand; beim Zeichnen die Linie bis zum Zeiger
+  const art = (a) => ["==", ["get", "art"], a];
+  add({ id: "gebiet-maske", type: "fill", source: "gebiet", filter: art("maske"), paint: { "fill-color": maskeFarbe(), "fill-opacity": maskeDeckung() } });
+  add({ id: "gebiet-rand", type: "line", source: "gebiet", filter: art("rand"), layout: { "line-join": "round" }, paint: { "line-color": css("--accent"), "line-width": 2, "line-opacity": 0.9 } });
+  add({ id: "gebiet-entwurf", type: "line", source: "gebiet", filter: art("entwurf"), layout: { "line-join": "round", "line-cap": "round" }, paint: { "line-color": css("--accent"), "line-width": 2, "line-dasharray": [2, 1.5] } });
   add({ id: "kandidaten-linie", type: "line", source: "kandidaten", layout: { "line-cap": "round" }, paint: { "line-color": css("--fg"), "line-width": 2.5, "line-offset": VERSATZ, "line-dasharray": [1.2, 1.4], "line-opacity": 0.85 } });
   add({ id: "zuordnung-linie", type: "line", source: "zuordnung", ...linie });
   add({ id: "zuordnung-pfeil", type: "symbol", source: "zuordnung", minzoom: 13, layout: { "symbol-placement": "line", "symbol-spacing": 36, "icon-image": "pfeil", "icon-size": ["interpolate", ["linear"], ["zoom"], 13, 0.35, 17, 0.6], "icon-allow-overlap": true, "icon-ignore-placement": true }, paint: { "icon-color": halo() } });
@@ -244,7 +256,10 @@ function zeichneEbenen() {
   // die gewählte Stelle obenauf, aus einer eigenen kleinen Quelle: Wählen zeichnet nicht alle neu
   add({ id: "auswahl-kreis", type: "circle", source: "auswahl", filter: istPunkt, ...kreis });
   add({ id: "auswahl-pfeil", type: "symbol", source: "auswahl", filter: ["all", istPunkt, [">=", ["get", "grad"], 0]], ...pfeil });
+  // die Ecken des Gebiets obenauf, damit sie sich greifen lassen
+  add({ id: "gebiet-ecken", type: "circle", source: "gebiet-ecken", paint: { "circle-radius": ["case", ["==", ["get", "erste"], 1], 7, 5], "circle-color": "#ffffff", "circle-stroke-color": css("--accent"), "circle-stroke-width": 2 } });
   zeichneDaten();
+  zeichneGebiet();
 }
 
 /** Solange MapLibre das Netz aufbereitet, sagt die Karte es; bei großen Netzen dauert das. */
@@ -346,6 +361,10 @@ function farbenNeu() {
   for (const id of ["stellen-pfeil", "auswahl-pfeil"]) set(id, "icon-color", pfeilFarbe());
   set("auswahl-linie", "line-color", lageFarbe());
   set("arme-linie", "line-color", css("--muted"));
+  set("gebiet-maske", "fill-color", maskeFarbe());
+  set("gebiet-maske", "fill-opacity", maskeDeckung());
+  for (const id of ["gebiet-rand", "gebiet-entwurf"]) set(id, "line-color", css("--accent"));
+  set("gebiet-ecken", "circle-stroke-color", css("--accent"));
   if (map.getLayer("bg")) map.setPaintProperty("bg", "background-color", css("--map-bg"));
 }
 
@@ -418,9 +437,20 @@ function hover(id) {
 }
 const linkUnter = (point) => (map.getLayer("netz-linie") ? map.queryRenderedFeatures([[point.x - 5, point.y - 5], [point.x + 5, point.y + 5]], { layers: ["netz-linie"] }) : []);
 map.on("mousemove", (e) => {
+  if (ziehen) {
+    ziehen.ring[ziehen.i] = [e.lngLat.lng, e.lngLat.lat];
+    zeichneGebiet(ziehen.ring);
+    return;
+  }
+  if (state.zeichnen) {
+    state.zeichnen.zeiger = [e.lngLat.lng, e.lngLat.lat];
+    zeichneGebiet();
+    return;
+  }
   if (!state.pick) {
-    const stelle = map.getLayer("stellen-kreis") && map.queryRenderedFeatures(e.point, { layers: ["stellen-kreis"] }).length;
-    map.getCanvas().style.cursor = stelle ? "pointer" : "";
+    const ecke = gebietEditierbar() && map.getLayer("gebiet-ecken") && map.queryRenderedFeatures(e.point, { layers: ["gebiet-ecken"] }).length;
+    const stelle = !ecke && map.getLayer("stellen-kreis") && map.queryRenderedFeatures(e.point, { layers: ["stellen-kreis"] }).length;
+    map.getCanvas().style.cursor = ecke ? "move" : stelle ? "pointer" : "";
     return;
   }
   const f = linkUnter(e.point)[0];
@@ -433,6 +463,8 @@ function linksUnter(point) {
   return linkUnter(point).map((f) => f.properties.i).filter((i) => !gesehen.has(i) && gesehen.add(i));
 }
 map.on("click", async (e) => {
+  if (state.zeichnen) return zeichnePunkt(e);
+  if (Date.now() - gezogen < 400) return; // das Ende eines Zugs an einer Ecke
   const st = map.getLayer("stellen-kreis") ? map.queryRenderedFeatures([[e.point.x - 4, e.point.y - 4], [e.point.x + 4, e.point.y + 4]], { layers: ["stellen-kreis"] }) : [];
   if (st.length && !state.pick) return waehle(st[st.length - 1].properties.id, { fliegen: false });
   const ids = linksUnter(e.point).slice(0, 6);
@@ -533,7 +565,7 @@ const fileName = (url) => {
   try { return decodeURIComponent(last); } catch { return last; }
 };
 const folderOf = (url) => new URL(".", url).href;
-const artVon = (name) => (/linkgeometr/i.test(name) || /\.csv(\.gz)?$/i.test(name) ? "geometrien" : /\.xml(\.gz)?$|\.pbf$/i.test(name) ? "netz" : /\.json$/i.test(name) ? "konfiguration" : null);
+const artVon = (name) => (/linkgeometr/i.test(name) || /\.csv(\.gz)?$/i.test(name) ? "geometrien" : /\.xml(\.gz)?$|\.pbf$/i.test(name) ? "netz" : /\.json$/i.test(name) ? "konfiguration" : /\.(geojson|poly|zip|shp|prj)$/i.test(name) ? "gebiet" : null);
 const istOsmName = (name) => /\.pbf$/i.test(name ?? "");
 
 /** Der Szenario-Stamm eines Dateinamens, wie in kachelwerk: berlin-v7.0-10pct.output_network.xml.gz -> berlin-v7.0. */
@@ -649,10 +681,13 @@ async function nimmDateien(files) {
   if (!liste.length) return;
   const netz = liste.find((f) => artVon(f.name) === "netz");
   const geos = liste.filter((f) => artVon(f.name) === "geometrien");
-  // eine Konfiguration zuerst: Ihre Einstellungen gelten schon beim Lesen des Netzes
+  // erst eine Konfiguration, dann ein Gebiet: Beides gilt schon beim Lesen des Netzes
   const konfig = liste.find((f) => artVon(f.name) === "konfiguration");
-  if (konfig && (!(await nimmKonfiguration(konfig, Boolean(netz))) || !netz)) return;
+  const gebiet = liste.filter((f) => artVon(f.name) === "gebiet");
+  if (konfig && !(await nimmKonfiguration(konfig, Boolean(netz)))) return;
+  if (gebiet.length && !(await nimmGebietDateien(gebiet, { waehlen: !netz }))) return;
   if (!netz) {
+    if (konfig || gebiet.length) return;
     if (geos.length && state.netz) return nimmGeometrie(geos[0]);
     return setStatus("Darunter ist kein Netz (MATSim network.xml, .xml.gz oder OSM .osm.pbf).", "error");
   }
@@ -1046,10 +1081,12 @@ function renderDatenText() {
   const stand = `Zählkarte vom ${esc(deDatum(d.erzeugt))}`;
   const alle = `${de(d.stellen.length)} Dauerzählstellen aus ${de(d.quellen.size)} Quellen`;
   const b = state.bereich;
+  const wo = state.gebiet ? "Im gewählten Gebiet" : "Im Gebiet des Netzes";
+  const klammer = state.gebiet && b ? `im ganzen Netz ${de(b.imNetz)}, in ganz Deutschland ${de(d.stellen.length)}` : `in ganz Deutschland ${de(d.stellen.length)} aus ${de(d.quellen.size)}`;
   let text;
   if (!b) text = `${stand}: ${alle} in ganz Deutschland. Mit einem Netz zählen nur die in seinem Gebiet.`;
-  else if (!b.imGebiet) text = `${stand}: Im Gebiet des Netzes liegen keine Dauerzählstellen (in ganz Deutschland ${alle}).`;
-  else text = `${stand}: Im Gebiet des Netzes liegen ${de(b.imGebiet)} Dauerzählstelle${b.imGebiet === 1 ? "" : "n"} aus ${de(b.quellen)} Quelle${b.quellen === 1 ? "" : "n"} (in ganz Deutschland ${de(d.stellen.length)} aus ${de(d.quellen.size)}).`;
+  else if (!b.imGebiet) text = `${stand}: ${wo} liegen keine Dauerzählstellen (${state.gebiet ? klammer : `in ganz Deutschland ${alle}`}).`;
+  else text = `${stand}: ${wo} liegen ${anzahl(b.imGebiet, "Dauerzählstelle", "Dauerzählstellen")} aus ${anzahl(b.quellen, "Quelle", "Quellen")} (${klammer}).`;
   if (d.version !== VERTRAG) text += ` <strong>Achtung:</strong> Die Daten haben Version ${esc(d.version)}, gebaut ist die Seite für Version ${VERTRAG}.`;
   $("daten-text").innerHTML = text;
 }
@@ -1133,7 +1170,7 @@ async function kurzStellen([w, s, o, n]) {
   const imGebiet = new Set();
   const quellen = new Set();
   for (const st of k.stellen.values()) {
-    if (st.lon >= w - rand && st.lon <= o + rand && st.lat >= s - rand && st.lat <= n + rand) {
+    if (st.lon >= w - rand && st.lon <= o + rand && st.lat >= s - rand && st.lat <= n + rand && inGebiet(`k:${st.id}`, st.lon, st.lat)) {
       imGebiet.add(st.id);
       quellen.add(st.quelle);
     }
@@ -1299,7 +1336,7 @@ function renderKurzStats() {
   }
   const mitLink = state.stellen.filter((s) => familieVon(s) === "kurz" && linkVon(s)).length;
   sum.textContent = `${de(i.punkte)} Punkte`;
-  const teile = [`Zählkarte vom ${esc(deDatum(k.manifest.erzeugt))}: Im Gebiet des Netzes liegen ${de(i.gebiet)} Stellen mit Kurzzeitzählungen; ${de(i.stellen.size)} davon haben eine passende Zählung (${de(i.knoten.size)} Knoten, ${de(i.querschnitte.size)} Querschnitte). Das ergibt ${de(i.punkte)} Punkte${state.netz && state.ergebnisse.size ? `, ${de(mitLink)} mit Link` : ""}.`];
+  const teile = [`Zählkarte vom ${esc(deDatum(k.manifest.erzeugt))}: ${state.gebiet ? "Im gewählten Gebiet" : "Im Gebiet des Netzes"} liegen ${de(i.gebiet)} Stellen mit Kurzzeitzählungen; ${de(i.stellen.size)} davon haben eine passende Zählung (${anzahl(i.knoten.size, "Knoten", "Knoten")}, ${anzahl(i.querschnitte.size, "Querschnitt", "Querschnitte")}). Das ergibt ${de(i.punkte)} Punkte${state.netz && state.ergebnisse.size ? `, ${de(mitLink)} mit Link` : ""}.`];
   if (i.ohneWinkel) teile.push(`${de(i.ohneWinkel)} Zu- oder Ausfahrten an Armen ohne Winkel bleiben draußen.`);
   if (i.ohneRichtung) teile.push(`${de(i.ohneRichtung)} Fahrtrichtungen an Querschnitten ohne Winkel sind zum Prüfen markiert.`);
   if (i.ohneLizenz) teile.push(`${de(i.ohneLizenz)} Punkte aus Lieferungen ohne Lizenz bleiben draußen.`);
@@ -1380,7 +1417,8 @@ async function waehleStellen() {
   }
   const [w, s, o, nn] = n.info.bbox;
   const rand = 0.002;
-  const imGebiet = d.stellen.filter((x) => x.lon >= w - rand && x.lon <= o + rand && x.lat >= s - rand && x.lat <= nn + rand);
+  const imNetz = d.stellen.filter((x) => x.lon >= w - rand && x.lon <= o + rand && x.lat >= s - rand && x.lat <= nn + rand);
+  const imGebiet = imNetz.filter((x) => inGebiet(`d:${x.id}`, x.lon, x.lat));
   const ohneKompass = $("ohne-kompass").checked;
   const gruende = { beide: 0, lizenz: 0, gruppe: 0, kompass: 0 };
   const ohneLizenz = new Set();
@@ -1413,7 +1451,7 @@ async function waehleStellen() {
   gewaehlt.sort((a, b) => ordnung.compare(a.id, b.id));
   kurze.sort((a, b) => ordnung.compare(a.id, b.id));
   gewaehlt.push(...kurze);
-  state.bereich = { imGebiet: imGebiet.length, quellen: new Set(imGebiet.map((x) => x.quelle)).size, gruende, ohneLizenz: [...ohneLizenz], dauer: gewaehlt.filter((x) => familieVon(x) === "dauer").length };
+  state.bereich = { imNetz: imNetz.length, quellenNetz: new Set(imNetz.map((x) => x.quelle)).size, imGebiet: imGebiet.length, quellen: new Set(imGebiet.map((x) => x.quelle)).size, gruende, ohneLizenz: [...ohneLizenz], dauer: gewaehlt.filter((x) => familieVon(x) === "dauer").length };
   renderKurz();
   state.stellen = gewaehlt;
   state.byId = new Map(gewaehlt.map((x) => [x.id, x]));
@@ -1445,7 +1483,7 @@ async function suche() {
   if (!stellen.length) {
     state.ergebnisse.clear();
     nachSuche();
-    setStatus(`Im Gebiet des Netzes liegen keine passenden Zählstellen.`, "idle");
+    setStatus(`${state.gebiet ? "Im gewählten Gebiet" : "Im Gebiet des Netzes"} liegen keine passenden Zählstellen.`, "idle");
     return;
   }
   setStatus(`Links zu ${de(stellen.length)} Zählstellen suchen …`);
@@ -1806,6 +1844,20 @@ function naechste() {
 $("naechste").addEventListener("click", naechste);
 
 document.addEventListener("keydown", (e) => {
+  if (state.zeichnen) {
+    const feld = e.target.closest("input, textarea, select");
+    if (e.key === "Escape") return zeichneEnde(false);
+    if (e.key === "Enter" && !feld) {
+      e.preventDefault();
+      return zeichneEnde(true);
+    }
+    if (e.key === "Backspace" && !feld) {
+      e.preventDefault();
+      state.zeichnen.punkte.pop();
+      zeichneGebiet();
+      return renderGebiet();
+    }
+  }
   if (e.key === "Escape") return pickEnde();
   if (e.target.closest("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
   const quer = familieVon(state.byId.get(state.auswahl)) === "quer";
@@ -1841,6 +1893,7 @@ function renderStats() {
   $("auswahl-stats").hidden = !b;
   if (!b) return;
   const dauer = state.stellen.filter((s) => familieVon(s) === "dauer");
+  $("st-gebiet-titel").textContent = state.gebiet ? "Im Gebiet" : "Im Netzgebiet";
   $("st-gebiet").textContent = de(b.imGebiet);
   $("st-gerichtet").textContent = de(dauer.length);
   $("st-link").textContent = de(dauer.filter((s) => linkVon(s)).length);
@@ -1854,10 +1907,11 @@ function renderAuswahl() {
   t.hidden = !b;
   if (!b) return;
   const teile = [];
-  if (b.gruende.lizenz) teile.push(`${de(b.gruende.lizenz)} stammen aus Quellen ohne Lizenz (${b.ohneLizenz.map(esc).join(", ")})`);
-  if (b.gruende.kompass) teile.push(`${de(b.gruende.kompass)} nennen nur ein Ziel`);
-  if (b.gruende.gruppe) teile.push(`${de(b.gruende.gruppe)} zählen keine der gewählten Gruppen`);
-  const quer = b.gruende.beide ? ` Nur angezeigt: ${de(b.gruende.beide)} zählen beide Richtungen zusammen oder nennen keine (die meisten Rad-Zählstellen). Sie passen auf keinen einzelnen Link; auf der Karte sind sie violett und werden nicht zugeordnet.` : "";
+  const eine = (n, eins, viele) => `${de(n)} ${n === 1 ? eins : viele}`;
+  if (b.gruende.lizenz) teile.push(`${eine(b.gruende.lizenz, "stammt", "stammen")} aus Quellen ohne Lizenz (${b.ohneLizenz.map(esc).join(", ")})`);
+  if (b.gruende.kompass) teile.push(`${eine(b.gruende.kompass, "nennt", "nennen")} nur ein Ziel`);
+  if (b.gruende.gruppe) teile.push(`${eine(b.gruende.gruppe, "zählt", "zählen")} keine der gewählten Gruppen`);
+  const quer = b.gruende.beide ? ` Nur angezeigt: ${eine(b.gruende.beide, "zählt beide Richtungen zusammen oder nennt keine", "zählen beide Richtungen zusammen oder nennen keine")} (die meisten Rad-Zählstellen). Sie passen auf keinen einzelnen Link; auf der Karte sind sie violett und werden nicht zugeordnet.` : "";
   t.innerHTML = `${teile.length ? `Draußen bleiben: ${teile.join("; ")}.` : "Alle gerichteten Stellen im Gebiet sind dabei."}${quer}`;
   renderGruppen();
 }
@@ -2445,6 +2499,7 @@ function baueCounts() {
     ["erstellt_mit", "matsim-counts-snapper, https://github.com/vizsim-lab/matsim-counts-snapper"],
     ["zaehlkarte", `Dauerzählstellen der Zählkarte (vizsim-lab), Stand ${d.erzeugt ?? "?"}, ${DATEN}dauer/`],
     ["netz", state.netz?.url ?? (state.netz?.beispiel ? BEISPIEL.url : state.netz?.name)],
+    ...(state.gebiet ? [["gebiet", gebietText()]] : []),
     ["aggregation", aggregatText(m)],
     ["statistik", m.statistik === "median" ? "MEDIAN" : "MEAN"],
     ["min_tage", m.minTage],
@@ -2549,6 +2604,7 @@ function baueKurzCounts() {
     ["zaehlart", "kurzzeit"],
     ["zaehlkarte", `Kurzzeitzählungen der Zählkarte (vizsim-lab) je Strom, Stand ${state.kurz.manifest?.erzeugt ?? "?"}, ${DATEN}stroeme/`],
     ["netz", state.netz?.url ?? (state.netz?.beispiel ? BEISPIEL.url : state.netz?.name)],
+    ...(state.gebiet ? [["gebiet", gebietText()]] : []),
     ["auswahl", kurzAuswahlText(o)],
     ["hinweis", "Je Messstelle ein gezählter Tag (Datum, Zählfenster und Art des Tages in ihren Attributen), nur die gezählten Stunden, meist 7 bis 19 Uhr. Eine Tagessumme ist nur die Summe des Zählfensters. Nach Stunden vergleichen, nicht über den Tag."],
     ["arm_abstand_m", o.abstand],
@@ -2831,6 +2887,258 @@ $("csv-file").addEventListener("change", async (e) => {
   }
 });
 
+// ---------- Gebiet ----------
+// Nur die Stellen in einem Gebiet: auf der Karte gezeichnet oder aus einer Datei (lib/gebiet.js).
+// Es gilt für Dauerzählstellen und Kurzzeitzählungen, über ihre eigene Lage; der Browser merkt es
+// sich, die Konfiguration trägt es, die counts.xml nennt es.
+const gebietCache = new Map(); // „d:“ oder „k:“ + ID der Stelle -> im Gebiet?
+let gebietHinweis = "";
+let ziehen = null; // { i, ring }, solange eine Ecke gezogen wird
+let gezogen = 0;
+
+function inGebiet(schluessel, lon, lat) {
+  if (!state.gebiet) return true;
+  let r = gebietCache.get(schluessel);
+  if (r === undefined) gebietCache.set(schluessel, (r = punktImGebiet(state.gebiet, lon, lat)));
+  return r;
+}
+
+/** Ein Gebiet aus dem GeoJSON-Feature der Konfiguration oder des Browsers, so wie es war (nicht neu vereinfacht). */
+function gebietAusFeature(f) {
+  const p = f?.properties ?? {};
+  return baueGebiet({ name: p.name ?? "Gebiet", art: p.art === "gezeichnet" ? "gezeichnet" : "datei", datei: p.datei ?? null, polygone: leseGeojson(f).polygone, vereinfachen: false });
+}
+
+const gebietEditierbar = () => !state.zeichnen && state.gebiet?.art === "gezeichnet" && state.gebiet.polygone.length === 1 && state.gebiet.polygone[0].length === 1;
+const gebietText = () => {
+  const g = state.gebiet;
+  return g ? `${g.name} (${g.art === "gezeichnet" ? "gezeichnet" : g.datei ?? "Datei"}), ${de(g.flaeche_km2, 1)} km²; nur Stellen darin` : null;
+};
+
+/** Das Gebiet setzen oder mit null aufheben: merken, zeichnen und die Stellen neu wählen. */
+function setzeGebiet(g, { hinweis = "", einpassen = false, waehlen = true } = {}) {
+  state.gebiet = g;
+  gebietHinweis = hinweis;
+  gebietCache.clear();
+  store.set("snapper.gebiet", JSON.stringify(g ? gebietGeojson(g) : null));
+  zeichneGebiet();
+  renderGebiet();
+  if (g && einpassen) map.fitBounds([[g.bbox[0], g.bbox[1]], [g.bbox[2], g.bbox[3]]], { padding: 40, duration: 0, maxZoom: 15 });
+  if (waehlen && state.netz) waehleStellen();
+  else renderDatenText();
+}
+
+const WELT = [[-179.9, -85], [179.9, -85], [179.9, 85], [-179.9, 85], [-179.9, -85]];
+const zu = (r) => [...r, r[0]];
+/** Ring mit gewünschtem Umlaufsinn: Ein Loch muss andersherum laufen als sein Rand, sonst füllt die Karte es. */
+function umlauf(ring, gegenUhr) {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += (ring[j][0] - ring[i][0]) * (ring[j][1] + ring[i][1]);
+  return (a > 0) === gegenUhr ? ring : [...ring].reverse();
+}
+
+/** Gebiet auf der Karte: draußen abgedunkelt, der Rand, die Ecken; beim Zeichnen der Entwurf. `ring` beim Ziehen einer Ecke. */
+function zeichneGebiet(ring = null) {
+  if (!styleReady) return;
+  const z = state.zeichnen;
+  const g = state.gebiet;
+  const features = [];
+  const ecken = [];
+  const punkt = (p, i, erste = 0) => ({ type: "Feature", properties: { i, erste }, geometry: { type: "Point", coordinates: p } });
+  if (z) {
+    const linie = [...z.punkte, ...(z.zeiger ? [z.zeiger] : [])];
+    if (linie.length >= 2) features.push({ type: "Feature", properties: { art: "entwurf" }, geometry: { type: "LineString", coordinates: linie } });
+    z.punkte.forEach((p, i) => ecken.push(punkt(p, i, i === 0 && z.punkte.length >= 3 ? 1 : 0)));
+  } else if (g) {
+    const polygone = ring ? [[ring]] : g.polygone;
+    features.push({ type: "Feature", properties: { art: "maske" }, geometry: { type: "Polygon", coordinates: [umlauf(WELT, true), ...polygone.map(([a]) => umlauf(zu(a), false))] } });
+    for (const [, ...loecher] of polygone) for (const l of loecher) features.push({ type: "Feature", properties: { art: "maske" }, geometry: { type: "Polygon", coordinates: [umlauf(zu(l), true)] } });
+    for (const p of polygone) for (const r of p) features.push({ type: "Feature", properties: { art: "rand" }, geometry: { type: "LineString", coordinates: zu(r) } });
+    if (gebietEditierbar()) (ring ?? g.polygone[0][0]).forEach((p, i) => ecken.push(punkt(p, i)));
+  }
+  setzeDaten("gebiet", { type: "FeatureCollection", features });
+  setzeDaten("gebiet-ecken", { type: "FeatureCollection", features: ecken });
+}
+
+function renderGebiet() {
+  const g = state.gebiet;
+  const z = state.zeichnen;
+  $("gebiet-zeichnen").textContent = z ? "Zeichnen abbrechen" : g ? "Neu zeichnen" : "Zeichnen";
+  $("gebiet-zeichnen").setAttribute("aria-pressed", String(Boolean(z)));
+  $("gebiet-weg").hidden = !g || Boolean(z);
+  $("gebiet-zeigen").hidden = !g || Boolean(z);
+  const t = $("gebiet-text");
+  if (z) {
+    t.textContent = `${anzahl(z.punkte.length, "Ecke", "Ecken")} gesetzt. ${z.punkte.length >= 3 ? "Doppelklick, Enter oder ein Klick auf die erste Ecke schließt das Gebiet." : "Klicke die Ecken des Gebiets auf der Karte."}`;
+    return;
+  }
+  if (!g) {
+    t.innerHTML = "Es zählen alle Stellen im Rechteck um die Links des Netzes. Ein Gebiet lässt sich auf der Karte zeichnen oder laden: GeoJSON, <code>.poly</code> wie für <code>osmium extract -p</code> oder ein Shapefile, gezippt oder als <code>.shp</code> mit <code>.prj</code>.";
+    return;
+  }
+  const bbox = state.netz?.info?.bbox;
+  const draussen = bbox && !ueberschneidet(g, bbox);
+  const wie = g.art === "gezeichnet" ? "gezeichnet" : `aus ${esc(g.datei ?? "einer Datei")}`;
+  const flaechen = g.polygone.length > 1 ? `${anzahl(g.polygone.length, "Fläche", "Flächen")}, ` : "";
+  t.innerHTML = `<strong>${esc(g.name)}</strong> (${wie}): ${flaechen}${de(g.flaeche_km2, g.flaeche_km2 < 10 ? 1 : 0)} km²${g.vereinfacht ? `, auf ${de(VEREINFACHT_M)} m genau vereinfacht (${de(g.punkte)} Punkte)` : ""}. Es zählen nur die Stellen darin.${gebietEditierbar() ? " Die Ecken lassen sich auf der Karte verschieben." : ""}${gebietHinweis ? ` ${esc(gebietHinweis)}` : ""}${draussen ? " <strong>Das Gebiet liegt nicht im Netz.</strong>" : ""}`;
+}
+
+function zeichneStart() {
+  pickEnde();
+  popup?.remove();
+  state.zeichnen = { punkte: [], zeiger: null };
+  mapwrap.classList.add("zeichnen");
+  $("gebiethint").hidden = false;
+  map.doubleClickZoom.disable();
+  zeichneGebiet();
+  renderGebiet();
+}
+
+function zeichneEnde(fertig) {
+  const z = state.zeichnen;
+  if (!z) return;
+  state.zeichnen = null;
+  mapwrap.classList.remove("zeichnen");
+  $("gebiethint").hidden = true;
+  // erst nach dem Doppelklick, der das Gebiet schließt, wieder mit Doppelklick zoomen
+  setTimeout(() => map.doubleClickZoom.enable(), 0);
+  if (fertig && z.punkte.length >= 3) {
+    try {
+      return setzeGebiet(baueGebiet({ name: "Gezeichnetes Gebiet", art: "gezeichnet", polygone: [[z.punkte]] }));
+    } catch (err) {
+      setStatus(`Gebiet: ${err.message}`, "error");
+    }
+  }
+  zeichneGebiet();
+  renderGebiet();
+}
+
+/** Ein Klick beim Zeichnen: eine Ecke mehr; auf der ersten Ecke schließt er das Gebiet. */
+function zeichnePunkt(e) {
+  const z = state.zeichnen;
+  const nah = (p, px) => {
+    const q = map.project(p);
+    return Math.hypot(q.x - e.point.x, q.y - e.point.y) < px;
+  };
+  // der zweite Klick eines Doppelklicks setzt keine Ecke
+  if (z.punkte.length && nah(z.punkte[z.punkte.length - 1], 4)) return;
+  if (z.punkte.length >= 3 && nah(z.punkte[0], 10)) return zeichneEnde(true);
+  z.punkte.push([e.lngLat.lng, e.lngLat.lat]);
+  zeichneGebiet();
+  renderGebiet();
+}
+
+map.on("dblclick", (e) => {
+  if (!state.zeichnen) return;
+  e.preventDefault();
+  zeichneEnde(true);
+});
+// eine Ecke eines gezeichneten Gebiets ziehen
+map.on("mousedown", "gebiet-ecken", (e) => {
+  if (!gebietEditierbar() || !e.features?.length) return;
+  e.preventDefault();
+  ziehen = { i: e.features[0].properties.i, ring: state.gebiet.polygone[0][0].map((p) => [...p]) };
+  map.getCanvas().style.cursor = "grabbing";
+});
+map.on("mouseup", () => {
+  if (!ziehen) return;
+  const { ring } = ziehen;
+  ziehen = null;
+  gezogen = Date.now();
+  map.getCanvas().style.cursor = "";
+  try {
+    setzeGebiet(baueGebiet({ name: state.gebiet.name, art: "gezeichnet", polygone: [[ring]] }));
+  } catch (err) {
+    setStatus(`Gebiet: ${err.message}`, "error");
+    zeichneGebiet();
+  }
+});
+
+/**
+ * Ein Gebiet aus Dateien: GeoJSON, .poly, ein gezipptes Shapefile oder .shp mit .prj. Ohne Angabe
+ * des Koordinatensystems gelten Grad als WGS 84, sonst das CRS des Netzes (oder des Formulars). -> ok
+ */
+async function nimmGebietDateien(files, { waehlen = true } = {}) {
+  const endet = (f, ...e) => e.some((x) => f.name.toLowerCase().endsWith(x));
+  const stammVon = (n) => n.split("/").pop().replace(/\.[^.]+$/, "");
+  const zip = files.find((f) => endet(f, ".zip"));
+  const shp = files.find((f) => endet(f, ".shp"));
+  const poly = files.find((f) => endet(f, ".poly"));
+  const json = files.find((f) => endet(f, ".geojson", ".json"));
+  const datei = (zip ?? shp ?? poly ?? json)?.name ?? files[0]?.name ?? "Gebiet";
+  try {
+    let polygone;
+    let crs = null;
+    let name;
+    if (zip) {
+      const dateien = await leseZip(new Uint8Array(await zip.arrayBuffer()), (n) => /\.(shp|prj)$/i.test(n));
+      const shpName = [...dateien.keys()].find((n) => /\.shp$/i.test(n));
+      if (!shpName) throw new Error("In der ZIP-Datei ist kein Shapefile (.shp).");
+      polygone = leseShp(dateien.get(shpName));
+      const prj = dateien.get(shpName.replace(/\.shp$/i, ".prj")) ?? [...dateien].find(([n]) => /\.prj$/i.test(n))?.[1];
+      crs = prj ? crsAusPrj(new TextDecoder().decode(prj)) : null;
+      name = stammVon(shpName);
+    } else if (shp) {
+      polygone = leseShp(new Uint8Array(await shp.arrayBuffer()));
+      const prj = files.find((f) => endet(f, ".prj"));
+      crs = prj ? crsAusPrj(await prj.text()) : null;
+      name = stammVon(shp.name);
+    } else if (poly) {
+      const r = lesePoly(await poly.text());
+      polygone = r.polygone;
+      name = r.name;
+    } else if (json) {
+      let roh;
+      try {
+        roh = JSON.parse(await json.text());
+      } catch {
+        throw new Error("Die Datei ist kein JSON.");
+      }
+      const r = leseGeojson(roh);
+      polygone = r.polygone;
+      crs = r.crs;
+      name = r.name ?? stammVon(json.name);
+    } else {
+      throw new Error("Erwartet wird GeoJSON, eine .poly-Datei oder ein Shapefile (.zip oder .shp mit .prj).");
+    }
+    if (!polygone.length) throw new Error("Darin ist keine Fläche.");
+    let hinweis = "";
+    if (crs && /^EPSG:4326$/i.test(crs)) crs = null;
+    if (crs || !siehtNachGradAus(polygone)) {
+      if (!crs) {
+        crs = state.netz?.info?.osm ? $("crs").value.trim() : state.netz?.info?.crs ?? $("crs").value.trim();
+        hinweis = `Die Datei nennt kein Koordinatensystem; gelesen als ${crs}.`;
+      }
+      const { projektion } = await import("./lib/crs.js");
+      let p;
+      try {
+        p = projektion(crs);
+      } catch (err) {
+        throw new Error(`Das Koordinatensystem der Datei kennt die Seite nicht (${err.message})`);
+      }
+      polygone = umrechnen(polygone, p.zuWgs);
+    }
+    const g = baueGebiet({ name, art: "datei", datei, polygone });
+    setzeGebiet(g, { hinweis, einpassen: true, waehlen });
+    return true;
+  } catch (err) {
+    setStatus(`Gebiet aus ${datei}: ${err.message}`, "error");
+    return false;
+  }
+}
+
+$("gebiet-zeichnen").addEventListener("click", () => (state.zeichnen ? zeichneEnde(false) : zeichneStart()));
+$("gebiet-weg").addEventListener("click", () => setzeGebiet(null));
+$("gebiet-zeigen").addEventListener("click", () => {
+  const g = state.gebiet;
+  if (g) map.fitBounds([[g.bbox[0], g.bbox[1]], [g.bbox[2], g.bbox[3]]], { padding: 40, duration: 400, maxZoom: 15 });
+});
+$("gebiet-file").addEventListener("change", (e) => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  if (files.length) nimmGebietDateien(files);
+});
+
 // ---------- Konfiguration ----------
 // Mit welchem Netz und welchen Daten gearbeitet wurde, alle Einstellungen und die Entscheidungen
 // von Hand, als JSON (lib/konfig.js). Wieder eingelesen gelten ihre Einstellungen, und die
@@ -2844,6 +3152,7 @@ function einstellungenJetzt() {
   return {
     crs: $("crs").value.trim(),
     osm_filter: $("osm-filter").value,
+    gebiet: state.gebiet ? gebietGeojson(state.gebiet) : null,
     suche: { radius_m: Number($("radius").value) || 50, max_winkel_grad: Number($("winkel").value) || 60, nur_ziel_mitnehmen: $("ohne-kompass").checked },
     gruppen: Object.fromEntries(GRUPPEN.map((g) => [g, { an: state.gruppen[g].an, network_mode: state.gruppen[g].mode, link_erlaubt: state.gruppen[g].link }])),
     kurzzeit: { an: state.kurz.an, von_jahr: k.vonJahr, bis_jahr: k.bisJahr, wochentage: k.wochentage, tage: k.tage, gruppen: k.gruppen, min_stunden: k.minStunden, arm_abstand_m: k.abstand, lieferungen: k.lieferungen ?? {} },
@@ -2882,8 +3191,10 @@ function ergebnisJetzt() {
     return { stellen: liste.length, mit_link: liste.filter((s) => linkVon(s)).length, in_ausgabe: genutzteStellen(familie).length, ...lagen };
   };
   const b = state.bereich;
+  const g = state.gebiet;
   return {
-    netzgebiet: b ? { dauerzaehlstellen: b.imGebiet, quellen: b.quellen } : null,
+    netzgebiet: b ? { dauerzaehlstellen: b.imNetz, quellen: b.quellenNetz } : null,
+    gebiet: b && g ? { name: g.name, flaeche_km2: Math.round(g.flaeche_km2 * 100) / 100, dauerzaehlstellen: b.imGebiet, quellen: b.quellen } : null,
     dauer: je("dauer"),
     kurzzeit: state.kurz.an ? je("kurz") : null,
     nur_angezeigt: state.stellen.filter((s) => familieVon(s) === "quer").length,
@@ -2972,6 +3283,14 @@ function wendeEinstellungenAn(e, { crs = true, osm = true } = {}) {
     store.set("snapper.osmFilter", e.osm_filter);
     $("osm-filter-text").textContent = OSM_FILTER[e.osm_filter].text ?? "";
   }
+  // ohne den Eintrag stammt die Konfiguration aus der Zeit vor dem Gebiet und galt fürs ganze Netz
+  let g = null;
+  try {
+    g = e.gebiet ? gebietAusFeature(e.gebiet) : null;
+  } catch {
+    g = null;
+  }
+  setzeGebiet(g, { waehlen: false, hinweis: e.gebiet && !g ? "Das Gebiet der Konfiguration ließ sich nicht lesen; es gilt das ganze Netz." : "" });
   if (e.suche) {
     if (zahl(e.suche.radius_m)) $("radius").value = String(zahl(e.suche.radius_m));
     if (zahl(e.suche.max_winkel_grad)) $("winkel").value = String(zahl(e.suche.max_winkel_grad));
@@ -3062,6 +3381,7 @@ async function nimmKonfiguration(file, netzDabei = false) {
     } catch {
       throw new Error("Die Datei ist kein JSON.");
     }
+    if (!json?.format && ["FeatureCollection", "Feature", "Polygon", "MultiPolygon", "GeometryCollection"].includes(json?.type)) return nimmGebietDateien([file], { waehlen: !netzDabei });
     k = leseKonfiguration(json);
   } catch (err) {
     setStatus(`${file.name}: ${err.message}`, "error");
@@ -3114,6 +3434,11 @@ try {
     if (k.opts?.lieferungen && typeof k.opts.lieferungen === "object") state.kurz.opts.lieferungen = { ...k.opts.lieferungen };
   }
 } catch { /* Vorgabe */ }
+try {
+  const f = JSON.parse(store.get("snapper.gebiet") ?? "null");
+  if (f) state.gebiet = gebietAusFeature(f);
+} catch { /* ohne Gebiet */ }
+renderGebiet();
 renderMittelRahmen();
 renderKurz();
 ladeDaten();

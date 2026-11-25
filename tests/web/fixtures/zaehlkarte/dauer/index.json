@@ -1,0 +1,226 @@
+{
+ "version": 5,
+ "erzeugt": "2026-11-20",
+ "gruppen": [
+  "kfz",
+  "lkw",
+  "sv",
+  "rad",
+  "fuss"
+ ],
+ "gruppen_namen": {
+  "kfz": "Kfz",
+  "lkw": "Lkw (Detektor)",
+  "sv": "Schwerverkehr (Detektor)",
+  "rad": "Rad",
+  "fuss": "Fuß"
+ },
+ "dateien": {
+  "details": "dauer/{n}.json"
+ },
+ "von": "2025-06-02",
+ "kalender": {
+  "BE": "ssssswwhsssswwsssssww"
+ },
+ "quellen": [
+  {
+   "code": "test_viz",
+   "name": "Teststadt (Detektoren)",
+   "land": "BE",
+   "quellenvermerk": "Teststadt / Detektoren",
+   "lizenzen": [
+    {
+     "code": "test_viz",
+     "titel": "Detektoren",
+     "herausgeber": "Teststadt",
+     "lizenz": "dl-de/by-2-0",
+     "lizenz_url": "https://www.govdata.de/dl-de/by-2-0"
+    }
+   ],
+   "stunden_von": "2025-06-02",
+   "bis": "2025-06-22",
+   "gruppen": [
+    "kfz",
+    "lkw"
+   ]
+  },
+  {
+   "code": "test_rad",
+   "name": "Teststadt (Rad)",
+   "land": "BE",
+   "lizenzen": [
+    {
+     "code": "test_rad",
+     "titel": "Rad-Zählstellen",
+     "herausgeber": "Teststadt",
+     "lizenz": "dl-de/zero-2-0",
+     "lizenz_url": "https://www.govdata.de/dl-de/zero-2-0"
+    }
+   ],
+   "stunden_von": "2025-06-02",
+   "bis": "2025-06-22",
+   "gruppen": [
+    "rad"
+   ]
+  },
+  {
+   "code": "test_ohne",
+   "name": "Teststadt (ohne Lizenz)",
+   "land": "BE",
+   "lizenzen": [
+    {
+     "code": "test_ohne",
+     "titel": "ohne",
+     "lizenz": null
+    }
+   ],
+   "gruppen": [
+    "kfz"
+   ]
+  }
+ ],
+ "stellen": {
+  "felder": [
+   "id",
+   "quelle",
+   "name",
+   "abschnitt",
+   "richtung",
+   "lon",
+   "lat",
+   "von",
+   "bis",
+   "g",
+   "ags",
+   "chunk"
+  ],
+  "werte": [
+   [
+    "test_viz:D1",
+    "test_viz",
+    "Hauptstraße",
+    null,
+    "Richtung Osten",
+    13.3813499,
+    52.5100929,
+    "2020-01-01",
+    "2025-06-22",
+    3,
+    "11000000",
+    0
+   ],
+   [
+    "test_viz:D2",
+    "test_viz",
+    "Hauptstraße",
+    null,
+    "Richtung Westen",
+    13.3813538,
+    52.5099851,
+    "2020-01-01",
+    "2025-06-22",
+    3,
+    "11000000",
+    0
+   ],
+   [
+    "test_viz:D3",
+    "test_viz",
+    "Querweg 1",
+    null,
+    "Richtung Norden",
+    13.3836001,
+    52.5114184,
+    "2020-01-01",
+    "2025-06-22",
+    3,
+    "11000000",
+    0
+   ],
+   [
+    "test_viz:D4",
+    "test_viz",
+    "Hinterhof",
+    null,
+    "Richtung Osten",
+    13.3813023,
+    52.511387,
+    "2020-01-01",
+    "2025-06-22",
+    3,
+    "11000000",
+    0
+   ],
+   [
+    "test_viz:D5",
+    "test_viz",
+    "Querweg 3",
+    null,
+    "Richtung Süden",
+    13.3922608,
+    52.5115364,
+    "2020-01-01",
+    "2025-06-22",
+    3,
+    "11000000",
+    0
+   ],
+   [
+    "test_rad:R1",
+    "test_rad",
+    "Querweg 2",
+    null,
+    "Richtung Norden",
+    13.3880188,
+    52.5114787,
+    "2020-01-01",
+    "2025-06-22",
+    8,
+    "11000000",
+    0
+   ],
+   [
+    "test_rad:R2",
+    "test_rad",
+    "Mittelweg",
+    null,
+    "Richtung Osten",
+    13.3812508,
+    52.5127889,
+    "2020-01-01",
+    "2025-06-22",
+    8,
+    "11000000",
+    0
+   ],
+   [
+    "test_rad:R3",
+    "test_rad",
+    "Querweg 0",
+    null,
+    null,
+    13.3790821,
+    52.5140539,
+    "2020-01-01",
+    "2025-06-22",
+    8,
+    "11000000",
+    0
+   ],
+   [
+    "test_ohne:X1",
+    "test_ohne",
+    "Ohne Lizenz",
+    null,
+    "Richtung Osten",
+    13.3853266,
+    52.5101472,
+    "2020-01-01",
+    "2025-06-22",
+    1,
+    "11000000",
+    0
+   ]
+  ]
+ }
+}

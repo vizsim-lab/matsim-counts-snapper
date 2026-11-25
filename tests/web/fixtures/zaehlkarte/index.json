@@ -1,0 +1,46 @@
+{
+ "version": 1,
+ "quellen": [
+  "test"
+ ],
+ "lagen": [
+  "gps",
+  "quelle",
+  "geokodiert",
+  "uebertragen"
+ ],
+ "stellen": {
+  "felder": [
+   "id",
+   "quelle",
+   "name",
+   "typ",
+   "lon",
+   "lat",
+   "lage",
+   "chunk"
+  ],
+  "werte": [
+   [
+    "test:K1",
+    0,
+    "Mittelweg / Querweg 1",
+    "K",
+    13.3834622,
+    52.5127652,
+    0,
+    0
+   ],
+   [
+    "test:Q1",
+    0,
+    "Querweg 0 (nördl. Hauptstraße)",
+    "Q",
+    13.3790929,
+    52.5113567,
+    0,
+    0
+   ]
+  ]
+ }
+}

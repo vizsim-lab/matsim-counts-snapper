@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v2.dtd">
+<network name="testgitter">
+	<attributes>
+		<attribute name="coordinateReferenceSystem" class="java.lang.String">EPSG:25833</attribute>
+	</attributes>
+	<nodes>
+		<node id="k00" x="390000" y="5819000"/>
+		<node id="k01" x="390000" y="5819300"/>
+		<node id="k02" x="390000" y="5819600"/>
+		<node id="k10" x="390300" y="5819000"/>
+		<node id="k11" x="390300" y="5819300"/>
+		<node id="k12" x="390300" y="5819600"/>
+		<node id="k20" x="390600" y="5819000"/>
+		<node id="k21" x="390600" y="5819300"/>
+		<node id="k22" x="390600" y="5819600"/>
+		<node id="k30" x="390900" y="5819000"/>
+		<node id="k31" x="390900" y="5819300"/>
+		<node id="k32" x="390900" y="5819600"/>
+	</nodes>
+	<links capperiod="01:00:00" effectivecellsize="7.5" effectivelanewidth="3.75">
+		<link id="k00-k10" from="k00" to="k10" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Hauptstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">100</attribute></attributes>
+		</link>
+		<link id="k10-k00" from="k10" to="k00" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Hauptstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">100</attribute></attributes>
+		</link>
+		<link id="k10-k20" from="k10" to="k20" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Hauptstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">100</attribute></attributes>
+		</link>
+		<link id="k20-k10" from="k20" to="k10" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Hauptstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">100</attribute></attributes>
+		</link>
+		<link id="k20-k30" from="k20" to="k30" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Hauptstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">100</attribute></attributes>
+		</link>
+		<link id="k30-k20" from="k30" to="k20" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Hauptstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">100</attribute></attributes>
+		</link>
+		<link id="k01-k11" from="k01" to="k11" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car">
+			<attributes><attribute name="name" class="java.lang.String">Mittelweg</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">101</attribute></attributes>
+		</link>
+		<link id="k11-k01" from="k11" to="k01" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car">
+			<attributes><attribute name="name" class="java.lang.String">Mittelweg</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">101</attribute></attributes>
+		</link>
+		<link id="k11-k21" from="k11" to="k21" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car">
+			<attributes><attribute name="name" class="java.lang.String">Mittelweg</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">101</attribute></attributes>
+		</link>
+		<link id="k21-k11" from="k21" to="k11" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car">
+			<attributes><attribute name="name" class="java.lang.String">Mittelweg</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">101</attribute></attributes>
+		</link>
+		<link id="k21-k31" from="k21" to="k31" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car">
+			<attributes><attribute name="name" class="java.lang.String">Mittelweg</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">101</attribute></attributes>
+		</link>
+		<link id="k31-k21" from="k31" to="k21" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car">
+			<attributes><attribute name="name" class="java.lang.String">Mittelweg</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">101</attribute></attributes>
+		</link>
+		<link id="k02-k12" from="k02" to="k12" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Nordstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">102</attribute></attributes>
+		</link>
+		<link id="k12-k02" from="k12" to="k02" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Nordstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">102</attribute></attributes>
+		</link>
+		<link id="k12-k22" from="k12" to="k22" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Nordstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">102</attribute></attributes>
+		</link>
+		<link id="k22-k12" from="k22" to="k12" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Nordstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">102</attribute></attributes>
+		</link>
+		<link id="k22-k32" from="k22" to="k32" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Nordstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">102</attribute></attributes>
+		</link>
+		<link id="k32-k22" from="k32" to="k22" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Nordstraße</attribute><attribute name="type" class="java.lang.String">secondary</attribute><attribute name="origid" class="java.lang.String">102</attribute></attributes>
+		</link>
+		<link id="k00-k01" from="k00" to="k01" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 0</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">200</attribute></attributes>
+		</link>
+		<link id="k01-k00" from="k01" to="k00" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 0</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">200</attribute></attributes>
+		</link>
+		<link id="k01-k02" from="k01" to="k02" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 0</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">200</attribute></attributes>
+		</link>
+		<link id="k02-k01" from="k02" to="k01" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 0</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">200</attribute></attributes>
+		</link>
+		<link id="k10-k11" from="k10" to="k11" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 1</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">201</attribute></attributes>
+		</link>
+		<link id="k11-k10" from="k11" to="k10" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 1</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">201</attribute></attributes>
+		</link>
+		<link id="k11-k12" from="k11" to="k12" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 1</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">201</attribute></attributes>
+		</link>
+		<link id="k12-k11" from="k12" to="k11" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 1</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">201</attribute></attributes>
+		</link>
+		<link id="k20-k21" from="k20" to="k21" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 2</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">202</attribute></attributes>
+		</link>
+		<link id="k21-k20" from="k21" to="k20" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 2</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">202</attribute></attributes>
+		</link>
+		<link id="k21-k22" from="k21" to="k22" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 2</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">202</attribute></attributes>
+		</link>
+		<link id="k22-k21" from="k22" to="k21" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 2</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">202</attribute></attributes>
+		</link>
+		<link id="k30-k31" from="k30" to="k31" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 3</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">203</attribute></attributes>
+		</link>
+		<link id="k31-k30" from="k31" to="k30" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 3</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">203</attribute></attributes>
+		</link>
+		<link id="k31-k32" from="k31" to="k32" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 3</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">203</attribute></attributes>
+		</link>
+		<link id="k32-k31" from="k32" to="k31" length="300.0" freespeed="13.89" capacity="1800.0" permlanes="1.0" oneway="1" modes="car,bike">
+			<attributes><attribute name="name" class="java.lang.String">Querweg 3</attribute><attribute name="type" class="java.lang.String">residential</attribute><attribute name="origid" class="java.lang.String">203</attribute></attributes>
+		</link>
+	</links>
+</network>

@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<counts xmlns="http://www.matsim.org/files/dtd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.matsim.org/files/dtd http://www.matsim.org/files/dtd/counts_v2.xsd" source="Zählkarte (vizsim-lab), Dauerzählstellen" name="Zählkarte netz" description="Mittel je Stunde über Di, Mi, Do (Mo–Fr nur Schultage), mindestens 5 Tage je Stunde" year="2025">
+	<attributes>
+		<attribute name="erstellt_mit" class="java.lang.String">matsim-counts-snapper, https://github.com/vizsim-lab/matsim-counts-snapper</attribute>
+		<attribute name="zaehlkarte" class="java.lang.String">Dauerzählstellen der Zählkarte (vizsim-lab), Stand 2026-11-20, http://127.0.0.1:4173/tests/web/fixtures/zaehlkarte/dauer/</attribute>
+		<attribute name="netz" class="java.lang.String">http://127.0.0.1:4173/tests/web/fixtures/netz.xml</attribute>
+		<attribute name="aggregation" class="java.lang.String">auswahl=TUESDAY,WEDNESDAY,THURSDAY</attribute>
+		<attribute name="statistik" class="java.lang.String">MEAN</attribute>
+		<attribute name="min_tage" class="java.lang.Integer">5</attribute>
+		<attribute name="tagesarten_mo_fr" class="java.lang.String">s</attribute>
+		<attribute name="nur_vollstaendig" class="java.lang.String">true</attribute>
+		<attribute name="gruppen" class="java.lang.String">kfz=car, rad=bike</attribute>
+		<attribute name="quelle_test_rad" class="java.lang.String">Teststadt (Rad); dl-de/zero-2-0 (https://www.govdata.de/dl-de/zero-2-0)</attribute>
+		<attribute name="quelle_test_viz" class="java.lang.String">Teststadt (Detektoren); dl-de/by-2-0 (https://www.govdata.de/dl-de/by-2-0); Teststadt / Detektoren</attribute>
+	</attributes>
+
+	<location refId="k20-k21" id="test_rad:R1" name="Querweg 2" x="390606.0" y="5819150.0">
+		<attributes>
+			<attribute name="quelle" class="java.lang.String">test_rad</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/zero-2-0</attribute>
+			<attribute name="richtung" class="java.lang.String">Richtung Norden</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">6.0</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+			<attribute name="tage_rad" class="java.lang.Integer">9</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="bike" interval="3600">
+			<value t="0" val="14.0"/>
+			<value t="3600" val="15.0"/>
+			<value t="7200" val="16.0"/>
+			<value t="10800" val="17.0"/>
+			<value t="14400" val="18.0"/>
+			<value t="18000" val="19.0"/>
+			<value t="21600" val="20.0"/>
+			<value t="25200" val="21.0"/>
+			<value t="28800" val="22.0"/>
+			<value t="32400" val="23.0"/>
+			<value t="36000" val="24.0"/>
+			<value t="39600" val="25.0"/>
+			<value t="43200" val="26.0"/>
+			<value t="46800" val="27.0"/>
+			<value t="50400" val="28.0"/>
+			<value t="54000" val="29.0"/>
+			<value t="57600" val="30.0"/>
+			<value t="61200" val="31.0"/>
+			<value t="64800" val="32.0"/>
+			<value t="68400" val="33.0"/>
+			<value t="72000" val="34.0"/>
+			<value t="75600" val="35.0"/>
+			<value t="79200" val="36.0"/>
+			<value t="82800" val="37.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k00-k10" id="test_viz:D1" name="Hauptstraße" x="390150.0" y="5819006.0">
+		<attributes>
+			<attribute name="quelle" class="java.lang.String">test_viz</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="richtung" class="java.lang.String">Richtung Osten</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">6.0</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+			<attribute name="tage_kfz" class="java.lang.Integer">9</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="0" val="109.0"/>
+			<value t="3600" val="119.0"/>
+			<value t="7200" val="129.0"/>
+			<value t="10800" val="139.0"/>
+			<value t="14400" val="149.0"/>
+			<value t="18000" val="159.0"/>
+			<value t="21600" val="169.0"/>
+			<value t="25200" val="179.0"/>
+			<value t="28800" val="189.0"/>
+			<value t="32400" val="199.0"/>
+			<value t="36000" val="209.0"/>
+			<value t="39600" val="219.0"/>
+			<value t="43200" val="229.0"/>
+			<value t="46800" val="239.0"/>
+			<value t="50400" val="249.0"/>
+			<value t="54000" val="259.0"/>
+			<value t="57600" val="269.0"/>
+			<value t="61200" val="279.0"/>
+			<value t="64800" val="289.0"/>
+			<value t="68400" val="299.0"/>
+			<value t="72000" val="309.0"/>
+			<value t="75600" val="319.0"/>
+			<value t="79200" val="329.0"/>
+			<value t="82800" val="339.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k10-k00" id="test_viz:D2" name="Hauptstraße" x="390150.0" y="5818994.0">
+		<attributes>
+			<attribute name="quelle" class="java.lang.String">test_viz</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="richtung" class="java.lang.String">Richtung Westen</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">6.0</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+			<attribute name="tage_kfz" class="java.lang.Integer">9</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="0" val="1109.0"/>
+			<value t="3600" val="1119.0"/>
+			<value t="7200" val="1129.0"/>
+			<value t="10800" val="1139.0"/>
+			<value t="14400" val="1149.0"/>
+			<value t="18000" val="1159.0"/>
+			<value t="21600" val="1169.0"/>
+			<value t="25200" val="1179.0"/>
+			<value t="28800" val="1189.0"/>
+			<value t="32400" val="1199.0"/>
+			<value t="36000" val="1209.0"/>
+			<value t="39600" val="1219.0"/>
+			<value t="43200" val="1229.0"/>
+			<value t="46800" val="1239.0"/>
+			<value t="50400" val="1249.0"/>
+			<value t="54000" val="1259.0"/>
+			<value t="57600" val="1269.0"/>
+			<value t="61200" val="1279.0"/>
+			<value t="64800" val="1289.0"/>
+			<value t="68400" val="1299.0"/>
+			<value t="72000" val="1309.0"/>
+			<value t="75600" val="1319.0"/>
+			<value t="79200" val="1329.0"/>
+			<value t="82800" val="1339.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k10-k11" id="test_viz:D3" name="Querweg 1" x="390306.0" y="5819150.0">
+		<attributes>
+			<attribute name="quelle" class="java.lang.String">test_viz</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="richtung" class="java.lang.String">Richtung Norden</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">6.0</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+			<attribute name="tage_kfz" class="java.lang.Integer">9</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="0" val="2109.0"/>
+			<value t="3600" val="2119.0"/>
+			<value t="7200" val="2129.0"/>
+			<value t="10800" val="2139.1"/>
+			<value t="14400" val="2149.0"/>
+			<value t="18000" val="2159.0"/>
+			<value t="21600" val="2169.0"/>
+			<value t="25200" val="2179.0"/>
+			<value t="28800" val="2189.0"/>
+			<value t="32400" val="2199.0"/>
+			<value t="36000" val="2209.0"/>
+			<value t="39600" val="2219.0"/>
+			<value t="43200" val="2229.0"/>
+			<value t="46800" val="2239.0"/>
+			<value t="50400" val="2249.0"/>
+			<value t="54000" val="2259.0"/>
+			<value t="57600" val="2269.0"/>
+			<value t="61200" val="2279.0"/>
+			<value t="64800" val="2289.0"/>
+			<value t="68400" val="2299.0"/>
+			<value t="72000" val="2309.0"/>
+			<value t="75600" val="2319.0"/>
+			<value t="79200" val="2329.0"/>
+			<value t="82800" val="2339.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k31-k30" id="test_viz:D5" name="Querweg 3" x="390894.0" y="5819150.0">
+		<attributes>
+			<attribute name="quelle" class="java.lang.String">test_viz</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="richtung" class="java.lang.String">Richtung Süden</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">6.0</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+			<attribute name="tage_kfz" class="java.lang.Integer">9</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="0" val="3109.0"/>
+			<value t="3600" val="3119.0"/>
+			<value t="7200" val="3129.0"/>
+			<value t="10800" val="3139.0"/>
+			<value t="14400" val="3149.0"/>
+			<value t="18000" val="3159.0"/>
+			<value t="21600" val="3169.0"/>
+			<value t="25200" val="3179.0"/>
+			<value t="28800" val="3189.0"/>
+			<value t="32400" val="3199.0"/>
+			<value t="36000" val="3209.0"/>
+			<value t="39600" val="3219.0"/>
+			<value t="43200" val="3229.0"/>
+			<value t="46800" val="3239.0"/>
+			<value t="50400" val="3249.0"/>
+			<value t="54000" val="3259.0"/>
+			<value t="57600" val="3269.0"/>
+			<value t="61200" val="3279.0"/>
+			<value t="64800" val="3289.0"/>
+			<value t="68400" val="3299.0"/>
+			<value t="72000" val="3309.0"/>
+			<value t="75600" val="3319.0"/>
+			<value t="79200" val="3329.0"/>
+			<value t="82800" val="3339.0"/>
+		</measurements>
+	</location>
+
+</counts>

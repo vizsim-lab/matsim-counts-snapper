@@ -267,7 +267,8 @@ code { font: 0.92em var(--font-mono); }
 .legend .lg .ln.dash { border-top-style: dashed; }
 .busy, .pickhint { position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); max-width: calc(100% - 140px); padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); font: 500 13px/1.3 var(--font-display); letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pickhint { top: auto; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); border-color: var(--signal); box-shadow: 0 2px 10px rgb(0 0 0 / 0.15); }
-.mapwrap.pick .maplibregl-canvas { cursor: crosshair; }
+.mapwrap.pick .maplibregl-canvas, .mapwrap.zeichnen .maplibregl-canvas { cursor: crosshair; }
+#gebiet-text strong { font-weight: 600; }
 .maplibregl-popup-content { background: var(--surface); color: var(--fg); border-radius: 8px; padding: 9px 11px; font: 12.5px/1.45 var(--font-body); box-shadow: 0 4px 18px rgb(0 0 0 / 0.18); }
 .maplibregl-popup-anchor-bottom .maplibregl-popup-tip { border-top-color: var(--surface); }
 .maplibregl-popup-anchor-top .maplibregl-popup-tip { border-bottom-color: var(--surface); }
@@ -316,8 +317,8 @@ code { font: 0.92em var(--font-mono); }
       <h2 id="h-netz"><b>1</b>Netz</h2>
       <label class="drop" id="drop" for="file">
         <strong>Netz wählen oder hierher ziehen</strong>
-        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>). Mit Geometrien passen die Abstände besser. Oder ein OSM-Auszug (<code>.osm.pbf</code>): Dann ist das Ergebnis eine Zuordnung, die sich auf jedes MATSim-Netz übertragen lässt; welche Wege daraus kommen, lässt sich danach wählen. Eine Konfiguration (<code>…-snapper-konfiguration.json</code>, aus Schritt 5) stellt Einstellungen und Entscheidungen wieder her, gern zusammen mit ihrem Netz.</small>
-        <input type="file" id="file" multiple accept=".xml,.gz,.csv,.pbf,.json,application/gzip,application/xml,text/xml,text/csv,application/json">
+        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>). Mit Geometrien passen die Abstände besser. Oder ein OSM-Auszug (<code>.osm.pbf</code>): Dann ist das Ergebnis eine Zuordnung, die sich auf jedes MATSim-Netz übertragen lässt; welche Wege daraus kommen, lässt sich danach wählen. Eine Konfiguration (<code>…-snapper-konfiguration.json</code>, aus Schritt 5) stellt Einstellungen und Entscheidungen wieder her, ein Gebiet (GeoJSON, <code>.poly</code>, Shapefile) beschränkt die Zählstellen; beides gern zusammen mit dem Netz.</small>
+        <input type="file" id="file" multiple accept=".xml,.gz,.csv,.pbf,.json,.geojson,.poly,.zip,.shp,.prj,application/gzip,application/xml,text/xml,text/csv,application/json,application/geo+json,application/zip">
       </label>
       <details class="svn" id="svn">
         <summary>Aus dem VSP-SVN laden <small>public-svn, countries/de</small></summary>
@@ -368,8 +369,19 @@ code { font: 0.92em var(--font-mono); }
     <section class="step inactive" id="s-stellen" aria-labelledby="h-stellen">
       <h2 id="h-stellen"><b>2</b>Zählstellen</h2>
       <p class="note" id="daten-text">Die Dauerzählstellen der Zählkarte werden geladen …</p>
+      <div class="field" id="gebiet-feld">
+        <span class="label">Gebiet</span>
+        <div class="row">
+          <button type="button" class="btn secondary small" id="gebiet-zeichnen" aria-pressed="false">Zeichnen</button>
+          <label class="btn secondary small" for="gebiet-file">Datei laden</label>
+          <input type="file" id="gebiet-file" class="visually-hidden" multiple accept=".geojson,.json,.poly,.zip,.shp,.prj,application/geo+json,application/json,application/zip">
+          <button type="button" class="linkbtn" id="gebiet-zeigen" hidden>zeigen</button>
+          <button type="button" class="linkbtn" id="gebiet-weg" hidden>ganzes Netz</button>
+        </div>
+        <small id="gebiet-text"></small>
+      </div>
       <dl class="stats" id="auswahl-stats" hidden>
-        <div><dt>Im Netzgebiet</dt><dd id="st-gebiet">–</dd></div>
+        <div><dt id="st-gebiet-titel">Im Netzgebiet</dt><dd id="st-gebiet">–</dd></div>
         <div><dt>Dabei</dt><dd id="st-gerichtet">–</dd></div>
         <div><dt>Mit Link</dt><dd id="st-link">–</dd></div>
       </dl>
@@ -565,6 +577,7 @@ code { font: 0.92em var(--font-mono); }
     </div>
     <div class="busy" id="busy" hidden></div>
     <div class="pickhint" id="pickhint" hidden>Klicke den Link, auf dem die Stelle zählt. <kbd>Esc</kbd> bricht ab.</div>
+    <div class="pickhint" id="gebiethint" hidden>Ecken klicken · Doppelklick oder erste Ecke schließt · <kbd>⌫</kbd> zurück · <kbd>Esc</kbd> bricht ab</div>
     <div class="legend" id="legend" hidden>
       <span class="title">Zählstellen</span>
       <span class="lg"><i style="--c: var(--st-passt)"></i>passt</span>
