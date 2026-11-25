@@ -227,10 +227,13 @@ function suche(job) {
     const liste = Number.isFinite(mx) && Number.isFinite(my)
       ? kandidaten(netz.index, { x: mx, y: my, grad: s.grad, name: s.name, modi: s.modi, radius: s.radius ?? undefined, rueckfall: s.rueckfall }, p, umkreis)
       : [];
+    // x/y (für die counts.xml): die Lage der Stelle selbst, auch wenn die Suche vom Anker einer
+    // übernommenen Zuordnung ausgeht – sonst änderte eine wieder eingelesene Zuordnung die Koordinaten
+    const [sx, sy] = s.ort ? netz.proj.vonWgs(s.ort.lon, s.ort.lat) : [x, y];
     return {
       id: s.id,
-      x,
-      y,
+      x: sx,
+      y: sy,
       umkreis,
       kandidaten: liste.map((k) => ({ ...steckbrief(k.i), d: k.d, abweichung: k.abweichung, grad: k.grad, anteil: k.anteil, namePasst: k.name, score: k.score, weit: Boolean(k.weit) })),
     };

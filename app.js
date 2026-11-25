@@ -11,11 +11,16 @@ import { verteile } from "./lib/zuordnung.js";
 import { VORGABE as MITTEL_VORGABE, WOCHENTAGE, mittle, aggregatText, auswahlText } from "./lib/mitteln.js";
 import { countsXml, zuordnungCsv, leseZuordnungCsv } from "./lib/counts.js";
 import { OSM_FILTER } from "./lib/osm.js";
+import { baueKonfiguration, leseKonfiguration, entscheidung as konfigEntscheidung } from "./lib/konfig.js";
 import { STROEME_VERTRAG, KURZ_GRUPPEN, KURZ_VORGABE, TAGTYP, leseManifest, leseStellen, stroemePfad, waehleZaehlungen, punkte as kurzPunkte, lizenzenVon } from "./lib/kurzzeit.js";
 
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const de = (n, digits = 0) => Number(n).toLocaleString("de-DE", { maximumFractionDigits: digits, minimumFractionDigits: digits });
+/** 1 Entscheidung, 2 Entscheidungen */
+const anzahl = (n, eins, viele) => `${de(n)} ${n === 1 ? eins : viele}`;
+/** 2026-11-23 -> 23.11.2026; anderes bleibt, wie es ist. */
+const deDatum = (iso) => (typeof iso === "string" && /^\d{4}-\d{2}-\d{2}/.test(iso) ? `${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}` : iso ?? "?");
 const mb = (bytes) => `${de(bytes / 1048576, bytes < 10485760 ? 1 : 0)} MB`;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const reason = (err) => (err?.name === "TypeError" ? "nicht erreichbar oder vom Browser blockiert" : err?.message ?? String(err));
@@ -528,7 +533,7 @@ const fileName = (url) => {
   try { return decodeURIComponent(last); } catch { return last; }
 };
 const folderOf = (url) => new URL(".", url).href;
-const artVon = (name) => (/linkgeometr/i.test(name) || /\.csv(\.gz)?$/i.test(name) ? "geometrien" : /\.xml(\.gz)?$|\.pbf$/i.test(name) ? "netz" : null);
+const artVon = (name) => (/linkgeometr/i.test(name) || /\.csv(\.gz)?$/i.test(name) ? "geometrien" : /\.xml(\.gz)?$|\.pbf$/i.test(name) ? "netz" : /\.json$/i.test(name) ? "konfiguration" : null);
 const istOsmName = (name) => /\.pbf$/i.test(name ?? "");
 
 /** Der Szenario-Stamm eines Dateinamens, wie in kachelwerk: berlin-v7.0-10pct.output_network.xml.gz -> berlin-v7.0. */
@@ -618,10 +623,13 @@ async function ladeNetzVonUrl({ net, geo = "auto", beispiel = false, crs = null 
   const name = beispiel ? BEISPIEL.name : fileName(net);
   try {
     let geoUrl = null;
-    if (geo === "auto" && !beispiel && !istOsmName(net)) {
-      setStatus("Link-Geometrien suchen …");
-      geoUrl = (await findGeometry(net).catch(() => ({ match: null }))).match?.url ?? null;
-    } else if (geo && geo !== "0" && !beispiel) {
+    // ein OSM-Auszug und das Beispiel haben keine Geometrien daneben („auto“ ist keine Datei)
+    if (geo === "auto") {
+      if (!beispiel && !istOsmName(net)) {
+        setStatus("Link-Geometrien suchen …");
+        geoUrl = (await findGeometry(net).catch(() => ({ match: null }))).match?.url ?? null;
+      }
+    } else if (geo && geo !== "0" && !beispiel && !istOsmName(net)) {
       geoUrl = new URL(geo, folderOf(net)).href;
     }
     const bytes = await fetchBytes(net, beispiel ? "Beispielnetz von GitHub" : name, ctrl.signal);
@@ -641,6 +649,9 @@ async function nimmDateien(files) {
   if (!liste.length) return;
   const netz = liste.find((f) => artVon(f.name) === "netz");
   const geos = liste.filter((f) => artVon(f.name) === "geometrien");
+  // eine Konfiguration zuerst: Ihre Einstellungen gelten schon beim Lesen des Netzes
+  const konfig = liste.find((f) => artVon(f.name) === "konfiguration");
+  if (konfig && (!(await nimmKonfiguration(konfig, Boolean(netz))) || !netz)) return;
   if (!netz) {
     if (geos.length && state.netz) return nimmGeometrie(geos[0]);
     return setStatus("Darunter ist kein Netz (MATSim network.xml, .xml.gz oder OSM .osm.pbf).", "error");
@@ -746,6 +757,10 @@ function chip(text, extra = "") {
 }
 
 function renderQuelle(n) {
+  // nur die Felder, die für das Netz gelten: der OSM-Filter beim OSM-Auszug, das CRS beim MATSim-Netz
+  const osmNetz = n ? Boolean(n.info?.osm) || (!n.info && istOsmName(n.name)) : null;
+  $("osm-feld").hidden = osmNetz === false;
+  $("crs-feld").hidden = $("crs-hinweis").hidden = osmNetz === true;
   const box = $("source");
   box.replaceChildren();
   if (!n) {
@@ -1011,10 +1026,7 @@ async function ladeDaten() {
     const res = await fetch(`${DATEN}dauer/index.json`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.daten = leseIndex(await res.json());
-    const d = state.daten;
-    const n = d.stellen.length;
-    $("daten-text").innerHTML = `Zählkarte vom ${esc(d.erzeugt ?? "?")}: ${de(n)} Dauerzählstellen aus ${de(d.quellen.size)} Quellen.` +
-      (d.version !== VERTRAG ? ` <strong>Achtung:</strong> Die Daten haben Version ${esc(d.version)}, gebaut ist die Seite für Version ${VERTRAG}.` : "");
+    renderDatenText();
     renderGruppen();
     if (state.netz) await waehleStellen();
   } catch (err) {
@@ -1022,6 +1034,24 @@ async function ladeDaten() {
     $("daten-text").textContent = `Die Dauerzählstellen der Zählkarte ließen sich nicht laden (${reason(err)}). Adresse: ${DATEN}dauer/index.json`;
     if (state.netz) setStatus("Ohne die Daten der Zählkarte gibt es nichts zuzuordnen.", "error");
   }
+}
+
+/**
+ * Was von der Zählkarte da ist: mit Netz die Dauerzählstellen in seinem Gebiet, ganz Deutschland
+ * nur in Klammern; ohne Netz ganz Deutschland.
+ */
+function renderDatenText() {
+  const d = state.daten;
+  if (!d) return;
+  const stand = `Zählkarte vom ${esc(deDatum(d.erzeugt))}`;
+  const alle = `${de(d.stellen.length)} Dauerzählstellen aus ${de(d.quellen.size)} Quellen`;
+  const b = state.bereich;
+  let text;
+  if (!b) text = `${stand}: ${alle} in ganz Deutschland. Mit einem Netz zählen nur die in seinem Gebiet.`;
+  else if (!b.imGebiet) text = `${stand}: Im Gebiet des Netzes liegen keine Dauerzählstellen (in ganz Deutschland ${alle}).`;
+  else text = `${stand}: Im Gebiet des Netzes liegen ${de(b.imGebiet)} Dauerzählstelle${b.imGebiet === 1 ? "" : "n"} aus ${de(b.quellen)} Quelle${b.quellen === 1 ? "" : "n"} (in ganz Deutschland ${de(d.stellen.length)} aus ${de(d.quellen.size)}).`;
+  if (d.version !== VERTRAG) text += ` <strong>Achtung:</strong> Die Daten haben Version ${esc(d.version)}, gebaut ist die Seite für Version ${VERTRAG}.`;
+  $("daten-text").innerHTML = text;
 }
 
 // ---------- Kurzzeitzählungen der Zählkarte ----------
@@ -1269,7 +1299,7 @@ function renderKurzStats() {
   }
   const mitLink = state.stellen.filter((s) => familieVon(s) === "kurz" && linkVon(s)).length;
   sum.textContent = `${de(i.punkte)} Punkte`;
-  const teile = [`Zählkarte vom ${esc(k.manifest.erzeugt ?? "?")}: Im Gebiet des Netzes liegen ${de(i.gebiet)} Stellen mit Kurzzeitzählungen; ${de(i.stellen.size)} davon haben eine passende Zählung (${de(i.knoten.size)} Knoten, ${de(i.querschnitte.size)} Querschnitte). Das ergibt ${de(i.punkte)} Punkte${state.netz && state.ergebnisse.size ? `, ${de(mitLink)} mit Link` : ""}.`];
+  const teile = [`Zählkarte vom ${esc(deDatum(k.manifest.erzeugt))}: Im Gebiet des Netzes liegen ${de(i.gebiet)} Stellen mit Kurzzeitzählungen; ${de(i.stellen.size)} davon haben eine passende Zählung (${de(i.knoten.size)} Knoten, ${de(i.querschnitte.size)} Querschnitte). Das ergibt ${de(i.punkte)} Punkte${state.netz && state.ergebnisse.size ? `, ${de(mitLink)} mit Link` : ""}.`];
   if (i.ohneWinkel) teile.push(`${de(i.ohneWinkel)} Zu- oder Ausfahrten an Armen ohne Winkel bleiben draußen.`);
   if (i.ohneRichtung) teile.push(`${de(i.ohneRichtung)} Fahrtrichtungen an Querschnitten ohne Winkel sind zum Prüfen markiert.`);
   if (i.ohneLizenz) teile.push(`${de(i.ohneLizenz)} Punkte aus Lieferungen ohne Lizenz bleiben draußen.`);
@@ -1383,13 +1413,14 @@ async function waehleStellen() {
   gewaehlt.sort((a, b) => ordnung.compare(a.id, b.id));
   kurze.sort((a, b) => ordnung.compare(a.id, b.id));
   gewaehlt.push(...kurze);
-  state.bereich = { imGebiet: imGebiet.length, gruende, ohneLizenz: [...ohneLizenz], dauer: gewaehlt.filter((x) => familieVon(x) === "dauer").length };
+  state.bereich = { imGebiet: imGebiet.length, quellen: new Set(imGebiet.map((x) => x.quelle)).size, gruende, ohneLizenz: [...ohneLizenz], dauer: gewaehlt.filter((x) => familieVon(x) === "dauer").length };
   renderKurz();
   state.stellen = gewaehlt;
   state.byId = new Map(gewaehlt.map((x) => [x.id, x]));
   if (state.auswahl && !state.byId.has(state.auswahl)) state.auswahl = null;
   for (const id of [...state.stunden.keys()]) if (!state.byId.has(id)) state.stunden.delete(id);
   await suche();
+  if (t === waehlToken && n === state.netz) await uebernimmAusstehende();
 }
 
 /**
@@ -1410,7 +1441,7 @@ const umkreisVon = (s) => {
 
 async function suche() {
   const t = ++state.suchToken;
-  const stellen = state.stellen.filter((s) => familieVon(s) !== "quer").map((s) => ({ id: s.id, ...suchpunkt(s), name: s.suchName ?? s.name, modi: s.modi, radius: umkreisVon(s), rueckfall: s.rueckfall }));
+  const stellen = state.stellen.filter((s) => familieVon(s) !== "quer").map((s) => ({ id: s.id, ...suchpunkt(s), ort: { lon: s.lon, lat: s.lat }, name: s.suchName ?? s.name, modi: s.modi, radius: umkreisVon(s), rueckfall: s.rueckfall }));
   if (!stellen.length) {
     state.ergebnisse.clear();
     nachSuche();
@@ -1817,6 +1848,7 @@ function renderStats() {
 }
 
 function renderAuswahl() {
+  renderDatenText();
   const b = state.bereich;
   const t = $("auswahl-text");
   t.hidden = !b;
@@ -2546,6 +2578,7 @@ function renderExport() {
   $("kurz-export").hidden = !kurzDa;
   for (const id of ["kurz-xml", "kurz-gz"]) $(id).disabled = !kurzDa || osm;
   $("zuordnung-csv").disabled = !state.stellen.length;
+  $("konfig-json").disabled = !state.netz;
   $("osm-export").hidden = !osm;
   const genutzt = genutzteStellen("dauer");
   const kurze = genutzteStellen("kurz");
@@ -2688,103 +2721,383 @@ $("zuordnung-csv").addEventListener("click", () => {
   setStatus(`Zuordnung von ${de(zeilen.length)} Stellen gespeichert.`, "done");
 });
 
+/**
+ * Entscheidungen aus einer Zuordnung übernehmen (Zeilen wie leseZuordnungCsv): von Hand Geprüftes
+ * mit Anker über den Anker übertragen, ohne Anker über die Link-ID; Ausgelassenes bleibt
+ * ausgelassen, Kommentare kommen mit. `name` ist die Herkunft für Hinweise und Status.
+ */
+async function uebernimmZuordnung(zeilen, name, vorab = null) {
+  let gesetzt = 0;
+  let fremd = 0;
+  let fremdKurz = 0;
+  let ohneLink = 0;
+  const mitAnker = [];
+  for (const z of zeilen) {
+    const s = state.byId.get(z.station);
+    if (!s) {
+      fremd++;
+      if (familieVonId(z.station) === "kurz") fremdKurz++;
+      continue;
+    }
+    if (familieVon(s) === "quer") continue; // nur angezeigt, nie zugeordnet
+    const ent = entscheid(s.id);
+    ent.kommentar = z.kommentar || ent.kommentar;
+    // aus dieser Seite: nur, was jemand entschieden hat; eine fremde CSV gilt ganz, wie in MATSim
+    if (z.zuordnung === "automatisch" || z.zuordnung === "ohne link") continue;
+    if (!z.using) {
+      ent.aus = true;
+      ent.link = null;
+      vonHand(ent);
+      gesetzt++;
+      continue;
+    }
+    ent.aus = false;
+    // mit Anker: übertragen, auch auf dasselbe Netz (dann passt die ID am selben Ort)
+    if (z.anker) {
+      mitAnker.push({ s, z });
+      continue;
+    }
+    if (!z.linkid) continue;
+    const r = await frage({ type: "link", id: z.linkid, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } }).catch(() => null);
+    if (r?.link) {
+      ent.link = r.link;
+      vonHand(ent);
+      gesetzt++;
+    } else ohneLink++;
+  }
+  const wie = { id: 0, weg: 0, lage: 0 };
+  let offen = 0;
+  if (mitAnker.length) {
+    const r = await frage({
+      type: "uebertrage",
+      anker: mitAnker.map(({ s, z }) => ({ id: s.id, lon: z.anker.lon, lat: z.anker.lat, grad: z.anker.grad, linkId: z.linkid || null, weg: z.weg, modi: s.modi, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } })),
+    });
+    const nach = new Map(r.ergebnisse.map((x) => [x.id, x]));
+    // ein Link trägt je Verkehrsmittel und Familie eine Stelle: bei zweien gewinnt, wessen Anker näher liegt
+    const belegt = new Map();
+    const platz = (familie, linkId) => `${familie}\u0000${linkId}`;
+    const mitAnkerIds = new Set(mitAnker.map(({ s }) => s.id));
+    for (const [andere, e] of state.entscheid) {
+      if (!e.link || mitAnkerIds.has(andere)) continue;
+      const key = platz(familieVonId(andere), e.link.id);
+      belegt.set(key, [...(belegt.get(key) ?? []), andere]);
+    }
+    const reihe = [...mitAnker].sort((a, b) => (nach.get(a.s.id)?.ankerAbstand ?? Infinity) - (nach.get(b.s.id)?.ankerAbstand ?? Infinity));
+    for (const { s, z } of reihe) {
+      const x = nach.get(s.id);
+      const ent = entscheid(s.id);
+      const herkunft = z.netz || name;
+      ent.anker = { lon: z.anker.lon, lat: z.anker.lat, grad: z.anker.grad, weg: z.weg, netz: herkunft };
+      const modi = ausgabeModi(s);
+      const key = x?.link ? platz(familieVon(s), x.link.id) : null;
+      const schon = key ? (belegt.get(key) ?? []).find((t) => ausgabeModi(state.byId.get(t) ?? { aktiv: [] }).some((m) => modi.includes(m))) : null;
+      if (x?.link && !schon) {
+        ent.link = x.link;
+        ent.uebernommen = { wie: x.wie, netz: herkunft, d: x.ankerAbstand != null ? Math.round(x.ankerAbstand * 10) / 10 : null };
+        belegt.set(key, [...(belegt.get(key) ?? []), s.id]);
+        wie[x.wie]++;
+      } else {
+        ent.link = null;
+        ent.uebernommen = null;
+        ent.anker.grund = schon ? `der passende Link ${x.link.id} gehört schon zu ${state.byId.get(schon)?.name || schon}` : x?.grund ?? "unklar";
+        offen++;
+      }
+    }
+  }
+  const teile = [`${name}:`];
+  if (vorab) teile.push(vorab);
+  const uebernommen = wie.id + wie.weg + wie.lage;
+  if (mitAnker.length) teile.push(`${de(uebernommen)} von ${anzahl(mitAnker.length, "geprüften Zuordnung", "geprüften Zuordnungen")} übernommen${uebernommen ? ` (${[[wie.id, "gleiche Link-ID"], [wie.weg, "gleicher OSM-Weg"], [wie.lage, "eindeutige Lage"]].filter(([n]) => n).map(([n, t]) => `${de(n)} ${t}`).join(", ")})` : ""}${offen ? `, ${de(offen)} zum Prüfen` : ""}.`);
+  if (gesetzt || !mitAnker.length) teile.push(`${anzahl(gesetzt, "Entscheidung", "Entscheidungen")} ${mitAnker.length ? "ohne Anker " : ""}übernommen.`);
+  if (fremd) teile.push(`${anzahl(fremd, "Station gehört", "Stationen gehören")} nicht zur Auswahl${fremdKurz ? ` (${anzahl(fremdKurz, "Kurzzeit-Punkt", "Kurzzeit-Punkte")}${state.kurz.an ? ", etwa aus anderen Jahren oder einer anderen Auswahl" : "; die Kurzzeitzählungen sind aus"})` : ""}.`);
+  if (ohneLink) teile.push(`${anzahl(ohneLink, "Link fehlt", "Links fehlen")} im Netz.`);
+  if (mitAnker.length) {
+    // die offenen suchen jetzt vom Anker aus
+    speichere();
+    await suche();
+    setStatus(teile.join(" "), "done");
+  } else geaendert(teile.join(" "));
+  return teile.join(" ");
+}
+
 $("csv-file").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   e.target.value = "";
   if (!file) return;
   try {
-    const zeilen = leseZuordnungCsv(await file.text());
-    let gesetzt = 0;
-    let fremd = 0;
-    let fremdKurz = 0;
-    let ohneLink = 0;
-    const mitAnker = [];
-    for (const z of zeilen) {
-      const s = state.byId.get(z.station);
-      if (!s) {
-        fremd++;
-        if (familieVonId(z.station) === "kurz") fremdKurz++;
-        continue;
-      }
-      const ent = entscheid(s.id);
-      ent.kommentar = z.kommentar || ent.kommentar;
-      // aus dieser Seite: nur, was jemand entschieden hat; eine fremde CSV gilt ganz, wie in MATSim
-      if (z.zuordnung === "automatisch" || z.zuordnung === "ohne link") continue;
-      if (!z.using) {
-        ent.aus = true;
-        ent.link = null;
-        vonHand(ent);
-        gesetzt++;
-        continue;
-      }
-      ent.aus = false;
-      // mit Anker: übertragen, auch auf dasselbe Netz (dann passt die ID am selben Ort)
-      if (z.anker) {
-        mitAnker.push({ s, z });
-        continue;
-      }
-      if (!z.linkid) continue;
-      const r = await frage({ type: "link", id: z.linkid, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } }).catch(() => null);
-      if (r?.link) {
-        ent.link = r.link;
-        vonHand(ent);
-        gesetzt++;
-      } else ohneLink++;
-    }
-    const wie = { id: 0, weg: 0, lage: 0 };
-    let offen = 0;
-    if (mitAnker.length) {
-      const r = await frage({
-        type: "uebertrage",
-        anker: mitAnker.map(({ s, z }) => ({ id: s.id, lon: z.anker.lon, lat: z.anker.lat, grad: z.anker.grad, linkId: z.linkid || null, weg: z.weg, modi: s.modi, stelle: { lon: s.lon, lat: s.lat, grad: s.r.grad } })),
-      });
-      const nach = new Map(r.ergebnisse.map((x) => [x.id, x]));
-      // ein Link trägt je Verkehrsmittel und Familie eine Stelle: bei zweien gewinnt, wessen Anker näher liegt
-      const belegt = new Map();
-      const platz = (familie, linkId) => `${familie}\u0000${linkId}`;
-      const mitAnkerIds = new Set(mitAnker.map(({ s }) => s.id));
-      for (const [andere, e] of state.entscheid) {
-        if (!e.link || mitAnkerIds.has(andere)) continue;
-        const key = platz(familieVonId(andere), e.link.id);
-        belegt.set(key, [...(belegt.get(key) ?? []), andere]);
-      }
-      const reihe = [...mitAnker].sort((a, b) => (nach.get(a.s.id)?.ankerAbstand ?? Infinity) - (nach.get(b.s.id)?.ankerAbstand ?? Infinity));
-      for (const { s, z } of reihe) {
-        const x = nach.get(s.id);
-        const ent = entscheid(s.id);
-        const herkunft = z.netz || file.name;
-        ent.anker = { lon: z.anker.lon, lat: z.anker.lat, grad: z.anker.grad, weg: z.weg, netz: herkunft };
-        const modi = ausgabeModi(s);
-        const key = x?.link ? platz(familieVon(s), x.link.id) : null;
-        const schon = key ? (belegt.get(key) ?? []).find((t) => ausgabeModi(state.byId.get(t) ?? { aktiv: [] }).some((m) => modi.includes(m))) : null;
-        if (x?.link && !schon) {
-          ent.link = x.link;
-          ent.uebernommen = { wie: x.wie, netz: herkunft, d: x.ankerAbstand != null ? Math.round(x.ankerAbstand * 10) / 10 : null };
-          belegt.set(key, [...(belegt.get(key) ?? []), s.id]);
-          wie[x.wie]++;
-        } else {
-          ent.link = null;
-          ent.uebernommen = null;
-          ent.anker.grund = schon ? `der passende Link ${x.link.id} gehört schon zu ${state.byId.get(schon)?.name || schon}` : x?.grund ?? "unklar";
-          offen++;
-        }
-      }
-    }
-    const teile = [`${file.name}:`];
-    const uebernommen = wie.id + wie.weg + wie.lage;
-    if (mitAnker.length) teile.push(`${de(uebernommen)} von ${de(mitAnker.length)} geprüften Zuordnungen übernommen${uebernommen ? ` (${[[wie.id, "gleiche Link-ID"], [wie.weg, "gleicher OSM-Weg"], [wie.lage, "eindeutige Lage"]].filter(([n]) => n).map(([n, t]) => `${de(n)} ${t}`).join(", ")})` : ""}${offen ? `, ${de(offen)} zum Prüfen` : ""}.`);
-    if (gesetzt || !mitAnker.length) teile.push(`${de(gesetzt)} Entscheidungen ${mitAnker.length ? "ohne Anker " : ""}übernommen.`);
-    if (fremd) teile.push(`${de(fremd)} Stationen gehören nicht zur Auswahl${fremdKurz ? ` (${de(fremdKurz)} Kurzzeit-Punkte${state.kurz.an ? ", etwa aus anderen Jahren oder einer anderen Auswahl" : "; die Kurzzeitzählungen sind aus"})` : ""}.`);
-    if (ohneLink) teile.push(`${de(ohneLink)} Links fehlen im Netz.`);
-    if (mitAnker.length) {
-      // die offenen suchen jetzt vom Anker aus
-      speichere();
-      await suche();
-      setStatus(teile.join(" "), "done");
-    } else geaendert(teile.join(" "));
+    await uebernimmZuordnung(leseZuordnungCsv(await file.text()), file.name);
   } catch (err) {
     setStatus(`${file.name}: ${err.message}`, "error");
   }
+});
+
+// ---------- Konfiguration ----------
+// Mit welchem Netz und welchen Daten gearbeitet wurde, alle Einstellungen und die Entscheidungen
+// von Hand, als JSON (lib/konfig.js). Wieder eingelesen gelten ihre Einstellungen, und die
+// Entscheidungen gehen wie die Zuordnungs-CSV über den Anker auf das geladene Netz.
+let ausstehend = null; // Entscheidungen einer eingelesenen Konfiguration, bis ein Netz mit Stellen da ist
+
+function einstellungenJetzt() {
+  leseMittelForm();
+  const m = state.mittel;
+  const k = state.kurz.opts;
+  return {
+    crs: $("crs").value.trim(),
+    osm_filter: $("osm-filter").value,
+    suche: { radius_m: Number($("radius").value) || 50, max_winkel_grad: Number($("winkel").value) || 60, nur_ziel_mitnehmen: $("ohne-kompass").checked },
+    gruppen: Object.fromEntries(GRUPPEN.map((g) => [g, { an: state.gruppen[g].an, network_mode: state.gruppen[g].mode, link_erlaubt: state.gruppen[g].link }])),
+    kurzzeit: { an: state.kurz.an, von_jahr: k.vonJahr, bis_jahr: k.bisJahr, wochentage: k.wochentage, tage: k.tage, gruppen: k.gruppen, min_stunden: k.minStunden, arm_abstand_m: k.abstand, lieferungen: k.lieferungen ?? {} },
+    mitteln: { wochentage: m.wochentage, von: m.von != null ? isoTag(m.von) : null, bis: m.bis != null ? isoTag(m.bis) : null, tagesarten: m.tagesarten, statistik: m.statistik, min_tage: m.minTage, nur_vollstaendig: m.nurVollstaendig },
+    ausgabe: { name: $("counts-name").value.trim() || null, jahr: Number($("jahr").value) || null, nur_gepruefte: $("nur-geprueft").checked },
+  };
+}
+
+function netzJetzt() {
+  const n = state.netz;
+  if (!n) return null;
+  const i = n.info ?? {};
+  return {
+    name: n.beispiel ? BEISPIEL.name : n.name,
+    url: n.beispiel ? BEISPIEL.url : n.url ?? null,
+    beispiel: Boolean(n.beispiel),
+    geometrien: n.geoName ?? null,
+    geometrien_url: n.geoUrl ?? null,
+    art: i.osm ? "osm" : "matsim",
+    osm_filter: i.osm?.filterCode ?? null,
+    crs: i.crs ?? null,
+    crs_aus_datei: Boolean(i.crsAusDatei),
+    links: i.links ?? null,
+    gebiet: i.bbox ? i.bbox.map((x) => Math.round(x * 1e5) / 1e5) : null,
+  };
+}
+
+const LAGE_JSON = { passt: "passt", pruefen: "zum_pruefen", geprueft: "geprueft", aus: "ausgelassen", ohne: "ohne_link" };
+
+/** Wie viele Stellen je Familie wo stehen und wie viele in die Ausgabe gehen. */
+function ergebnisJetzt() {
+  const je = (familie) => {
+    const liste = state.stellen.filter((s) => familieVon(s) === familie);
+    const lagen = Object.fromEntries(Object.values(LAGE_JSON).map((l) => [l, 0]));
+    for (const s of liste) lagen[LAGE_JSON[lageVon(s)]]++;
+    return { stellen: liste.length, mit_link: liste.filter((s) => linkVon(s)).length, in_ausgabe: genutzteStellen(familie).length, ...lagen };
+  };
+  const b = state.bereich;
+  return {
+    netzgebiet: b ? { dauerzaehlstellen: b.imGebiet, quellen: b.quellen } : null,
+    dauer: je("dauer"),
+    kurzzeit: state.kurz.an ? je("kurz") : null,
+    nur_angezeigt: state.stellen.filter((s) => familieVon(s) === "quer").length,
+  };
+}
+
+const lizenzJson = (l) => Object.fromEntries(Object.entries({ titel: l.titel, lizenz: l.lizenz, herausgeber: l.herausgeber, url: l.url }).filter(([, v]) => v));
+
+/** Die Quellen der Stellen, die in die Ausgabe gehen, mit ihren Lizenzen (wie unter Schritt 5). */
+function quellenJetzt() {
+  const d = state.daten;
+  const liste = [...new Set(genutzteStellen("dauer").map((s) => s.quelle))].map((c) => d?.quellen.get(c)).filter(Boolean)
+    .map((q) => ({ zaehlart: "dauer", code: q.code, name: q.name, lizenzen: q.lizenzen.map(lizenzJson), quellenvermerk: q.quellenvermerk ?? null }));
+  for (const { quelle, lizenzen } of kurzLizenzen(genutzteStellen("kurz"))) liste.push({ zaehlart: "kurzzeit", code: quelle.code, name: quelle.name, lizenzen: lizenzen.map(lizenzJson), quellenvermerk: null });
+  return liste;
+}
+
+/** Die Entscheidungen von Hand: geprüft (mit Anker), ausgelassen, Kommentare; dazu die gespeicherten außerhalb der Auswahl. */
+function entscheidungenJetzt() {
+  const liste = [];
+  for (const s of state.stellen) {
+    if (familieVon(s) === "quer") continue;
+    const e = state.entscheid.get(s.id);
+    if (!e || (!e.link && !e.aus && !e.kommentar)) continue;
+    const link = e.aus ? null : e.link;
+    liste.push(konfigEntscheidung({
+      station: s.id,
+      zaehlart: familieVon(s) === "kurz" ? "kurzzeit" : "dauer",
+      zuordnung: e.aus ? "ausgelassen" : link ? "geprüft" : "automatisch",
+      linkid: link?.id ?? null,
+      kommentar: e.kommentar,
+      anker: link ? ankerVon(s) : null,
+      osmWeg: link?.weg ?? null,
+      name: s.name,
+      richtung: richtungsText(s),
+      uebernommen: link && e.uebernommen ? { wie: e.uebernommen.wie, netz: e.uebernommen.netz } : null,
+    }));
+  }
+  // für dieses Netz gespeichert, aber gerade nicht in der Auswahl (etwa eine abgewählte Gruppe)
+  for (const [id, roh] of Object.entries(gespeichert)) {
+    if (state.byId.has(id) || (!roh.link && !roh.aus && !roh.kommentar)) continue;
+    liste.push(konfigEntscheidung({ station: id, zaehlart: familieVonId(id) === "kurz" ? "kurzzeit" : "dauer", zuordnung: roh.aus ? "ausgelassen" : roh.link ? "geprüft" : "automatisch", linkid: roh.link, kommentar: roh.kommentar, inAuswahl: false }));
+  }
+  return liste;
+}
+
+function konfigurationJetzt() {
+  const d = state.daten;
+  const km = state.kurz.manifest;
+  return baueKonfiguration({
+    seite: `${location.origin}${location.pathname}`,
+    netz: netzJetzt(),
+    daten: {
+      adresse: DATEN,
+      dauer: d ? { erzeugt: d.erzeugt, version: d.version } : null,
+      kurzzeit: state.kurz.an && km ? { erzeugt: km.erzeugt ?? null, stroeme_version: STROEME_VERTRAG } : null,
+    },
+    einstellungen: einstellungenJetzt(),
+    ergebnis: ergebnisJetzt(),
+    quellen: quellenJetzt(),
+    entscheidungen: entscheidungenJetzt(),
+  });
+}
+
+$("konfig-json").addEventListener("click", () => {
+  const k = konfigurationJetzt();
+  speichern(`${stamm()}-snapper-konfiguration.json`, `${JSON.stringify(k, null, 2)}\n`, "application/json");
+  const hand = k.entscheidungen.filter((e) => e.zuordnung !== "automatisch").length;
+  const kommentare = k.entscheidungen.length - hand;
+  setStatus(`Konfiguration gespeichert: Netz, Datenstand, Einstellungen und ${anzahl(hand, "Entscheidung", "Entscheidungen")} von Hand${kommentare ? `, dazu ${anzahl(kommentare, "Kommentar", "Kommentare")}` : ""}.`, "done");
+});
+
+/** Dasselbe Netz: gleicher Name und gleich viele Links. */
+const gleichesNetz = (a, b) => Boolean(a && b) && a.name === b.name && a.links === b.links;
+
+/**
+ * Die Einstellungen einer Konfiguration ins Formular und in den Zustand; was fehlt, bleibt, wie es
+ * ist. Das CRS gehört zu ihrem Netz und gilt nur mit `crs`, der OSM-Filter nur mit `osm`.
+ */
+function wendeEinstellungenAn(e, { crs = true, osm = true } = {}) {
+  const zahl = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+  const tage = (liste) => liste.map(Number).filter((x) => Number.isInteger(x) && x >= 0 && x <= 6);
+  if (crs && typeof e.crs === "string" && e.crs.trim()) $("crs").value = e.crs.trim();
+  if (osm && e.osm_filter && OSM_FILTER[e.osm_filter]) {
+    $("osm-filter").value = e.osm_filter;
+    store.set("snapper.osmFilter", e.osm_filter);
+    $("osm-filter-text").textContent = OSM_FILTER[e.osm_filter].text ?? "";
+  }
+  if (e.suche) {
+    if (zahl(e.suche.radius_m)) $("radius").value = String(zahl(e.suche.radius_m));
+    if (zahl(e.suche.max_winkel_grad)) $("winkel").value = String(zahl(e.suche.max_winkel_grad));
+    if (typeof e.suche.nur_ziel_mitnehmen === "boolean") $("ohne-kompass").checked = e.suche.nur_ziel_mitnehmen;
+  }
+  for (const [g, c] of Object.entries(e.gruppen ?? {})) {
+    if (!state.gruppen[g] || !c) continue;
+    if (typeof c.an === "boolean") state.gruppen[g].an = c.an;
+    if (typeof c.network_mode === "string" && c.network_mode.trim()) state.gruppen[g].mode = c.network_mode.trim();
+    if (typeof c.link_erlaubt === "string" && c.link_erlaubt.trim()) state.gruppen[g].link = c.link_erlaubt.trim();
+  }
+  store.set("snapper.gruppen", JSON.stringify(state.gruppen));
+  const k = e.kurzzeit;
+  if (k) {
+    const o = state.kurz.opts;
+    if (typeof k.an === "boolean") state.kurz.an = k.an;
+    if ("von_jahr" in k) o.vonJahr = zahl(k.von_jahr);
+    if ("bis_jahr" in k) o.bisJahr = zahl(k.bis_jahr);
+    if (Array.isArray(k.wochentage)) o.wochentage = tage(k.wochentage);
+    if (Array.isArray(k.tage)) o.tage = k.tage.filter((x) => typeof x === "string");
+    if (Array.isArray(k.gruppen)) o.gruppen = k.gruppen.filter((g) => KURZ_GRUPPEN.includes(g));
+    if (zahl(k.min_stunden)) o.minStunden = Math.max(1, Math.min(24, zahl(k.min_stunden)));
+    if (zahl(k.arm_abstand_m)) o.abstand = Math.max(10, Math.min(100, zahl(k.arm_abstand_m)));
+    if (k.lieferungen && typeof k.lieferungen === "object") o.lieferungen = Object.fromEntries(Object.entries(k.lieferungen).filter(([, v]) => typeof v === "boolean"));
+    kurzSpeichern();
+    if (state.kurz.an) $("kurz").open = true;
+    renderKurz();
+  }
+  const m = e.mitteln;
+  if (m) {
+    const t = state.mittel;
+    if (Array.isArray(m.wochentage)) t.wochentage = tage(m.wochentage);
+    const tag = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : "");
+    if ("von" in m) $("von").value = tag(m.von);
+    if ("bis" in m) $("bis").value = tag(m.bis);
+    if (Array.isArray(m.tagesarten)) for (const c of document.querySelectorAll(".tagesart")) c.checked = m.tagesarten.includes(c.value);
+    if (m.statistik === "mittel" || m.statistik === "median") {
+      t.statistik = m.statistik;
+      for (const x of $("statistik").querySelectorAll("button")) x.setAttribute("aria-checked", String(x.value === m.statistik));
+    }
+    if (zahl(m.min_tage)) $("min-tage").value = String(Math.max(1, zahl(m.min_tage)));
+    if (typeof m.nur_vollstaendig === "boolean") $("vollstaendig").checked = m.nur_vollstaendig;
+    leseMittelForm();
+    renderMittelRahmen();
+  }
+  const a = e.ausgabe;
+  if (a) {
+    if ("name" in a) $("counts-name").value = typeof a.name === "string" ? a.name : "";
+    if (zahl(a.jahr)) $("jahr").value = String(zahl(a.jahr));
+    if (typeof a.nur_gepruefte === "boolean") $("nur-geprueft").checked = a.nur_gepruefte;
+  }
+  renderGruppen();
+}
+
+/** Nach dem Wählen der Stellen: die Entscheidungen einer eingelesenen Konfiguration übernehmen. */
+async function uebernimmAusstehende() {
+  if (!ausstehend || !state.netz || !state.stellen.length) return;
+  const a = ausstehend;
+  ausstehend = null;
+  const gleich = gleichesNetz(a.netz, netzJetzt());
+  // gespeicherte Entscheidungen außerhalb der Auswahl tragen nur eine Link-ID: nur im selben Netz
+  let gemerkt = 0;
+  if (a.weitere.length && gleich) {
+    for (const e of a.weitere) {
+      if (gespeichert[e.station]) continue;
+      gespeichert[e.station] = { link: e.linkid ?? null, aus: e.zuordnung === "ausgelassen", kommentar: e.kommentar ?? "", anker: null, uebernommen: null };
+      gemerkt++;
+    }
+    const key = speicherSchluessel();
+    if (gemerkt && key) store.set(key, JSON.stringify(gespeichert));
+  }
+  const teile = [a.zeilen.length ? await uebernimmZuordnung(a.zeilen, a.name, "Einstellungen übernommen.") : `${a.name}: Einstellungen übernommen, keine Entscheidungen von Hand.`];
+  if (gemerkt) teile.push(`${anzahl(gemerkt, "weitere Entscheidung", "weitere Entscheidungen")} für Stellen außerhalb der Auswahl gemerkt.`);
+  if (a.netz?.name && !gleich) teile.push(`Die Konfiguration stammt von ${a.netz.name}${a.netz.art === "osm" ? " (OSM-Auszug)" : ""}.`);
+  setStatus(teile.join(" "), "done");
+}
+
+/**
+ * Eine Konfiguration einlesen: Einstellungen übernehmen und die Entscheidungen merken, bis Stellen
+ * da sind. Ohne Netz lädt sie das ihre, wenn es eine Adresse hat; mit `netzDabei` kommt es mit.
+ */
+async function nimmKonfiguration(file, netzDabei = false) {
+  let k;
+  try {
+    let json;
+    try {
+      json = JSON.parse(await file.text());
+    } catch {
+      throw new Error("Die Datei ist kein JSON.");
+    }
+    k = leseKonfiguration(json);
+  } catch (err) {
+    setStatus(`${file.name}: ${err.message}`, "error");
+    return false;
+  }
+  const n = state.netz;
+  const kn = k.netz;
+  // Das CRS gehört zum Netz: Es gilt nur für das Netz der Konfiguration und nur, wenn es dort aus
+  // dem Formular kam. Den OSM-Filter hat nur eine Sitzung mit OSM-Auszug benutzt.
+  const crs = kn?.art !== "osm" && !kn?.crs_aus_datei && (!n || netzDabei || gleichesNetz(kn, netzJetzt()));
+  const osm = !kn || kn.art === "osm";
+  const vorher = { crs: $("crs").value.trim(), osm: $("osm-filter").value };
+  wendeEinstellungenAn(k.einstellungen, { crs, osm });
+  ausstehend = { zeilen: k.zeilen, weitere: k.weitere, netz: kn, name: file.name };
+  if (netzDabei) return true;
+  if (n) {
+    // ein anderes CRS oder ein anderer OSM-Filter wirkt erst, wenn das Netz neu gelesen ist
+    const neuLesen = n.info?.osm ? $("osm-filter").value !== vorher.osm : !n.info?.crsAusDatei && $("crs").value.trim() !== vorher.crs;
+    if (neuLesen) await nochmal();
+    else await waehleStellen();
+  } else if (k.netz?.beispiel) {
+    await ladeNetzVonUrl({ net: BEISPIEL.url, beispiel: true, crs: BEISPIEL.crs });
+  } else if (k.netz?.url) {
+    setStatus(`${file.name}: Einstellungen übernommen, ${k.netz.name ?? "das Netz"} wird geladen …`, "busy");
+    await ladeNetzVonUrl({ net: k.netz.url, geo: k.netz.geometrien_url ?? (k.netz.geometrien ? "auto" : "0") });
+  } else {
+    const wo = k.netz?.name ? ` (in der Konfiguration: ${k.netz.name})` : "";
+    setStatus(`${file.name}: Einstellungen übernommen. ${k.zeilen.length ? `${k.zeilen.length === 1 ? "Die Entscheidung kommt" : `Die ${de(k.zeilen.length)} Entscheidungen kommen`}, sobald ein Netz geladen ist${wo}.` : `Jetzt ein Netz laden${wo}.`}`, "idle");
+  }
+  return true;
+}
+
+$("konfig-file").addEventListener("change", (ev) => {
+  const file = ev.target.files[0];
+  ev.target.value = "";
+  if (file) nimmKonfiguration(file);
 });
 
 // ---------- Start ----------

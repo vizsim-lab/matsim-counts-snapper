@@ -19,10 +19,14 @@ Detektoren der Verkehrsinformationszentrale.
    Attribut `origgeom`. Gelesen wird wie in [kachelwerk](https://github.com/vizsim-lab/kachelwerk);
    Links ohne `modes` gelten wie in MATSim als `car`, pt-Links bleiben aus der Karte. Das CRS kommt
    aus dem Netz-Attribut `coordinateReferenceSystem`, sonst aus dem Formular. Oder ein OSM-Auszug
-   (`.osm.pbf`), siehe [unten](#osm-auszug-und-übernahme-auf-ein-anderes-netz).
+   (`.osm.pbf`), siehe [unten](#osm-auszug-und-übernahme-auf-ein-anderes-netz). Das Formular zeigt
+   nur, was für das geladene Netz gilt: das CRS bei einem MATSim-Netz, die Auswahl der Wege bei
+   einem OSM-Auszug. Hierher lässt sich auch eine [Konfiguration](#konfiguration) ziehen, gern
+   zusammen mit ihrem Netz.
 2. **Zählstellen:** die Dauerzählstellen der Zählkarte im Gebiet des Netzes, die eine Richtung
    zählen und aus einer Quelle mit Lizenz stammen; die ohne Richtung nur zum Ansehen (siehe
-   [unten](#daten-der-zählkarte)). Je Gruppe der Zählkarte (`kfz`, `lkw`, `sv`,
+   [unten](#daten-der-zählkarte)). Mit geladenem Netz nennt der Schritt die Zahl der Stellen und
+   Quellen in seinem Gebiet, ganz Deutschland nur in Klammern. Je Gruppe der Zählkarte (`kfz`, `lkw`, `sv`,
    `rad`, `fuss`) lässt sich wählen, ob sie mitkommt, unter welchem `networkMode` sie in die
    counts.xml geht und welche Modi ihr Link erlauben muss. Vorgabe: Kfz als `car`, Rad als `bike`.
    Darunter lassen sich die Kurzzeitzählungen dazunehmen.
@@ -37,7 +41,8 @@ Detektoren der Verkehrsinformationszentrale.
    mit einer Mindestzahl an Tagen je Stunde. Vorgabe wie MATSims `CreateCountsFromBAStData`:
    Dienstag bis Donnerstag, Mittel, dazu nur Schultage und mindestens 5 Tage.
 5. **Ausgeben:** `counts.xml` oder `.xml.gz`, mit Kurzzeitzählungen dazu `counts-kurzzeit.xml`,
-   und die Zuordnung als CSV (bei einem OSM-Auszug nur sie).
+   die Zuordnung als CSV (bei einem OSM-Auszug nur sie) und die [Konfiguration](#konfiguration):
+   Netz, Datenstand, alle Einstellungen und die Entscheidungen von Hand.
 
 ### Welche Stellen zum Prüfen markiert sind
 
@@ -207,7 +212,7 @@ Kurzzeit-Punkte Ringe, gestrichelt mit ihrem Knoten verbunden.
 Nach [`counts_v2.xsd`](https://github.com/matsim-org/matsim-libs/blob/main/matsim/src/main/resources/dtd/counts_v2.xsd):
 
 - `<location refId="Link" id="Station" name="Straße" x="…" y="…">`, die Koordinaten der Stelle
-  im CRS des Netzes
+  im CRS des Netzes (auch bei einer übertragenen Zuordnung die der Stelle, nicht die des Ankers)
 - je Gruppe `<measurements type="volumes" networkMode="car" interval="3600">` mit
   `<value t="…" val="…"/>`; `t` ist der Beginn der Stunde in Sekunden (0 = 0 bis 1 Uhr)
 - in den `attributes` der Stelle: Quelle, Lizenz, Abschnitt, Richtung, Abstand und Abweichung zum
@@ -268,6 +273,50 @@ Links über den Anker (siehe oben) und stellt die ausgelassenen Stellen her; die
 Seite neu. Eine CSV ohne die Spalte `zuordnung`, etwa `input/counts_mapping.csv` aus dem Berliner
 Szenario, gilt ganz, so wie MATSim sie liest.
 
+### Konfiguration
+
+`…-snapper-konfiguration.json` hält fest, wie eine Ausgabe entstand, und lässt sich wieder
+einlesen (Schritt 5, „Konfiguration laden“, oder in das Feld von Schritt 1 ziehen):
+
+```json
+{
+  "format": "matsim-counts-snapper/konfiguration",
+  "version": 1,
+  "erstellt": "2026-11-25T10:07:46.330Z",
+  "netz": { "name": "berlin-network.xml.gz", "url": "https://…", "art": "matsim", "crs": "EPSG:31468",
+            "crs_aus_datei": false, "links": 27664, "gebiet": [11.27297, 50.32298, 14.97004, 54.30024] },
+  "daten": { "adresse": "https://vizsim-lab.github.io/zaehlkarte/data/",
+             "dauer": { "erzeugt": "2026-11-23", "version": 5 }, "kurzzeit": { "erzeugt": "2026-11-18" } },
+  "einstellungen": { "crs": "…", "osm_filter": "…", "suche": { "radius_m": 50, "max_winkel_grad": 60 },
+                     "gruppen": { "kfz": { "an": true, "network_mode": "car", "link_erlaubt": "car" } },
+                     "kurzzeit": { "an": true, "von_jahr": 2019 }, "mitteln": { "statistik": "mittel" },
+                     "ausgabe": { "jahr": 2024 } },
+  "ergebnis": { "netzgebiet": { "dauerzaehlstellen": 403, "quellen": 5 }, "dauer": { "stellen": 288, "geprueft": 2 } },
+  "quellen": [{ "zaehlart": "dauer", "code": "berlin_viz", "lizenzen": [{ "lizenz": "dl-de/by-2-0" }] }],
+  "entscheidungen": [
+    { "station": "berlin_viz:TE011", "zaehlart": "dauer", "zuordnung": "geprüft", "linkid": "2437",
+      "anker": { "lon": 13.3592345, "lat": 52.409723, "grad": 22 }, "osm_weg": null, "in_auswahl": true },
+    { "station": "berlin_viz:TE021", "zuordnung": "ausgelassen", "linkid": null, "in_auswahl": true },
+    { "station": "berlin_viz:TE022", "zuordnung": "automatisch", "kommentar": "…", "in_auswahl": true }
+  ]
+}
+```
+
+(gekürzt). `netz` sagt, mit welchem Netz gearbeitet wurde: Datei oder Adresse, OSM-Auszug oder
+MATSim-Netz, CRS und ob es aus der Datei kam, Zahl der Links, Gebiet (WGS 84). `daten` nennt Ort
+und Stand der Zählkarte, `einstellungen` alles aus den Schritten 1 bis 5, `ergebnis` und `quellen`
+was dabei herauskam. `entscheidungen` sind nur die von Hand: geprüfte Links mit Anker, ausgelassene
+Stellen und Kommentare (`automatisch` mit Kommentar); `in_auswahl: false` sind Entscheidungen für
+dieses Netz, deren Stellen gerade nicht gewählt sind, etwa weil ihre Gruppe aus ist.
+
+Wieder eingelesen gelten die Einstellungen. Das CRS gehört zum Netz: Es gilt nur für das Netz der
+Konfiguration und nur, wenn es dort aus dem Formular kam; der Filter der OSM-Wege nur aus einer
+Sitzung mit OSM-Auszug. Ist kein Netz geladen und kennt die Konfiguration die Adresse ihres Netzes,
+lädt sie es. Die Entscheidungen gehen wie die der [Zuordnung](#zuordnung-als-csv) über den Anker
+auf das geladene Netz, auch auf ein anderes oder aus OSM; die außerhalb der Auswahl nur ins selbe
+Netz, denn sie tragen nur die Link-ID. Mit demselben Netz und Datenstand ergibt sich wieder dieselbe
+`counts.xml`.
+
 ## Lizenzen der Daten
 
 In die Ausgabe kommen nur Quellen mit Lizenz, wie beim CSV-Export der Zählkarte. Ihre
@@ -319,6 +368,7 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
   Fahrtrichtungen, Lizenz je Lieferung
 - `lib/mitteln.js`: Tage wählen, Mittel oder Median
 - `lib/counts.js`: counts.xml schreiben, Zuordnungs-CSV schreiben und lesen
+- `lib/konfig.js`: Konfiguration bauen und lesen
 - `vendor/`: MapLibre GL JS, proj4, Schriften
 - `tests/`: Tests der Bausteine, `npm test` (Node 20 oder neuer, ohne Abhängigkeiten)
 

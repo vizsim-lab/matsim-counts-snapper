@@ -14,6 +14,7 @@
 :root {
   --bg: #f2f4f7;
   --surface: #ffffff;
+  --step-bg: #f9fafc;
   --fg: #17202c;
   --muted: #586373;
   --line: #d5dbe3;
@@ -38,6 +39,7 @@
   :root {
     --bg: #0f1520;
     --surface: #161e2b;
+    --step-bg: #121a26;
     --fg: #e4e9f0;
     --muted: #97a2b3;
     --line: #283446;
@@ -70,7 +72,7 @@ code { font: 0.92em var(--font-mono); }
   position: relative; /* hält absolut gesetzte Kinder (.visually-hidden) in der Seitenleiste */
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 16px;
   overflow-y: auto;
   border-right: 1px solid var(--line);
   padding-block: 20px 28px;
@@ -95,9 +97,12 @@ code { font: 0.92em var(--font-mono); }
 .plate span { font: 500 12.5px/1.2 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.85; }
 .lede { margin: -8px 0 0; color: var(--muted); font-size: 14px; max-width: 36em; }
 
-.step { display: flex; flex-direction: column; gap: 10px; }
-.step h2 { display: flex; align-items: baseline; gap: 8px; margin: 0; font: 600 13px/1 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.step h2 b { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--muted); font-weight: 700; font-size: 12px; letter-spacing: 0; color: var(--fg); }
+/* Jeder Schritt ein eigener Kasten: oben Nummer und Name, darunter seine Felder. */
+.step { display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--step-bg); }
+.step h2 { display: flex; align-items: center; gap: 10px; margin: 0 0 2px; padding-bottom: 11px; border-bottom: 1px solid var(--line); font: 600 15px/1 var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; color: var(--fg); }
+.step h2 b { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--fg); color: var(--step-bg); font-weight: 700; font-size: 13px; letter-spacing: 0; }
+.step.inactive h2 { color: var(--muted); }
+.step.inactive h2 b { background: var(--muted); }
 .step.inactive > :not(h2) { opacity: 0.55; }
 
 .drop { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 14px; border: 1.5px dashed var(--line); border-radius: 10px; background: var(--surface); cursor: pointer; transition: border-color 120ms; }
@@ -187,7 +192,8 @@ code { font: 0.92em var(--font-mono); }
 .gruppen { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .gruppen th { padding: 0 6px 4px 0; font: 600 11.5px/1.2 var(--font-display); letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); text-align: left; }
 .gruppen td { padding: 3px 6px 3px 0; border-top: 1px solid var(--line); vertical-align: middle; }
-.gruppen input[type="text"] { width: 6.5em; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); font: 13px/1.3 var(--font-mono); }
+/* die Felder schrumpfen mit der Spalte, damit die Tabelle auch im schmalen Kasten passt */
+.gruppen input[type="text"] { box-sizing: border-box; width: 100%; min-width: 4.5em; max-width: 7.5em; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--fg); font: 13px/1.3 var(--font-mono); }
 .gruppen .n { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
 .gruppen tr.off td:not(:first-child) { opacity: 0.5; }
 
@@ -287,6 +293,7 @@ code { font: 0.92em var(--font-mono); }
   .legend { flex-direction: row; flex-wrap: wrap; gap: 3px 10px; max-width: calc(100% - 120px); padding: 5px 8px; font-size: 11.5px; }
   .legend .title { display: none; }
   .busy { top: calc(128px + env(safe-area-inset-top, 0px)); }
+  .step { padding: 12px 11px 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .bar.indeterminate i { animation: none; width: 100%; opacity: 0.5; }
@@ -309,8 +316,8 @@ code { font: 0.92em var(--font-mono); }
       <h2 id="h-netz"><b>1</b>Netz</h2>
       <label class="drop" id="drop" for="file">
         <strong>Netz wählen oder hierher ziehen</strong>
-        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>). Mit Geometrien passen die Abstände besser. Oder ein OSM-Auszug (<code>.osm.pbf</code>): Dann ist das Ergebnis eine Zuordnung, die sich auf jedes MATSim-Netz übertragen lässt.</small>
-        <input type="file" id="file" multiple accept=".xml,.gz,.csv,.pbf,application/gzip,application/xml,text/xml,text/csv">
+        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>). Mit Geometrien passen die Abstände besser. Oder ein OSM-Auszug (<code>.osm.pbf</code>): Dann ist das Ergebnis eine Zuordnung, die sich auf jedes MATSim-Netz übertragen lässt; welche Wege daraus kommen, lässt sich danach wählen. Eine Konfiguration (<code>…-snapper-konfiguration.json</code>, aus Schritt 5) stellt Einstellungen und Entscheidungen wieder her, gern zusammen mit ihrem Netz.</small>
+        <input type="file" id="file" multiple accept=".xml,.gz,.csv,.pbf,.json,application/gzip,application/xml,text/xml,text/csv,application/json">
       </label>
       <details class="svn" id="svn">
         <summary>Aus dem VSP-SVN laden <small>public-svn, countries/de</small></summary>
@@ -331,7 +338,7 @@ code { font: 0.92em var(--font-mono); }
         <button type="button" class="linkbtn" id="geo-clear" hidden>ohne Geometrien</button>
       </div>
       <div class="fields">
-        <div class="field">
+        <div class="field" id="crs-feld">
           <label for="crs">Koordinatensystem</label>
           <input type="text" id="crs" value="EPSG:25832" spellcheck="false" autocomplete="off" list="crs-list">
           <datalist id="crs-list">
@@ -348,11 +355,11 @@ code { font: 0.92em var(--font-mono); }
           <span class="label">Beispiel</span>
           <button type="button" class="btn secondary small" id="beispiel">Berlin laden</button>
         </div>
-        <div class="field wide"><small>Das Koordinatensystem gilt, wenn das Netz keins nennt (Attribut <code>coordinateReferenceSystem</code>). Auch proj4-Definitionen gehen, etwa von epsg.io.</small></div>
-        <div class="field wide">
+        <div class="field wide" id="crs-hinweis"><small>Das Koordinatensystem gilt, wenn das Netz keins nennt (Attribut <code>coordinateReferenceSystem</code>). Auch proj4-Definitionen gehen, etwa von epsg.io.</small></div>
+        <div class="field wide" id="osm-feld">
           <label for="osm-filter">Wege aus OSM</label>
           <select id="osm-filter"></select>
-          <small><span id="osm-filter-text"></span> Gilt beim Lesen einer <code>.osm.pbf</code>. Große Gebiete vorher zuschneiden: <code>osmium extract -p gebiet.poly</code>, <code>osmium tags-filter … w/highway</code>.</small>
+          <small><span id="osm-filter-text"></span> Gilt beim Lesen eines Auszugs (<code>.osm.pbf</code>); geändert, wird er neu gelesen. Große Gebiete vorher zuschneiden: <code>osmium extract -p gebiet.poly</code>, <code>osmium tags-filter … w/highway</code>.</small>
         </div>
       </div>
       <p class="credit" id="credit" hidden></p>
@@ -526,10 +533,15 @@ code { font: 0.92em var(--font-mono); }
         <button type="button" class="btn secondary" id="kurz-gz" disabled>.xml.gz</button>
         <span class="note">Kurzzeitzählungen: je Messstelle ein Tag, nur die gezählten Stunden. Nach Stunden vergleichen, nicht über den Tag.</span>
       </div>
+      <p class="note" id="export-text" hidden></p>
       <p class="note" id="osm-export" hidden>Aus einem OSM-Auszug gibt es keine <code>counts.xml</code>: Die Kanten gehören zu keinem MATSim-Netz. Die Zuordnung (CSV) trägt je Stelle den Punkt auf der Straße, die Richtung und den OSM-Weg; mit einem MATSim-Netz geladen, wird sie dort übernommen.</p>
       <p class="note">Die Zuordnung ist eine CSV im Format von MATSims <code>--counts-mapping</code>: Station, <code>linkid</code>, <code>using</code>, Kommentar, dazu wie der Link zustande kam und sein Anker – der Punkt auf dem Link, seine Richtung und der OSM-Weg. Wieder eingelesen, auch zu einem anderen Netz oder aus OSM, überträgt sie die geprüften Links über den Anker: gleiche Link-ID am selben Ort, gleicher OSM-Weg in derselben Richtung oder der einzige passende Link am Punkt. Was so nicht eindeutig ist, kommt zum Prüfen; ausgelassene Stellen bleiben ausgelassen.
         <label class="linkbtn">Zuordnung laden<input type="file" id="csv-file" class="visually-hidden" accept=".csv,text/csv"></label></p>
-      <p class="note" id="export-text" hidden></p>
+      <div class="row">
+        <button type="button" class="btn secondary" id="konfig-json" disabled>Konfiguration (JSON)</button>
+        <label class="linkbtn">Konfiguration laden<input type="file" id="konfig-file" class="visually-hidden" accept=".json,application/json"></label>
+      </div>
+      <p class="note">Die Konfiguration hält fest, wie die Ausgabe entstand: welches Netz (Datei oder Adresse, CRS, Zahl der Links, Gebiet), welcher Stand der Zählkarte, alle Einstellungen der Schritte 1 bis 5, die Quellen und die Entscheidungen von Hand – geprüfte Links mit Anker, ausgelassene Stellen, Kommentare. Wieder eingelesen stellt sie die Einstellungen her, lädt ihr Netz, wenn keins geladen ist und sie seine Adresse kennt, und überträgt die Entscheidungen wie die Zuordnung, auch auf ein anderes Netz.</p>
       <div class="field" id="quellen-box" hidden>
         <span class="label">Quellen und Lizenzen in der Ausgabe</span>
         <ul class="quellen" id="quellen"></ul>
