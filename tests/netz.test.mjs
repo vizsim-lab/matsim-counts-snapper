@@ -6,6 +6,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { gzipSync, zstdCompressSync, createZstdCompress, constants as Z } from "node:zlib";
 import { leseNetz, leseLinkGeometrien, zstdStrom, zstdKopf, istZstd, istGzip, ZSTD_MAX_FENSTER } from "../lib/netz.js";
+import { setzeSprache } from "../lib/sprache.js";
+
+// Die Bausteine sprechen hier Deutsch; Englisch prüft sprache.test.mjs
+setzeSprache("de");
 
 const NETZ = readFileSync(new URL("./web/fixtures/netz.xml", import.meta.url));
 const zst = (b, params = {}) => new Uint8Array(zstdCompressSync(b, { params }));

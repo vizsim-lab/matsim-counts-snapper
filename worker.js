@@ -9,9 +9,10 @@ import { projektion, lageMit, randpunkte, KANDIDATEN } from "./lib/crs.js";
 import { LinkIndex, kandidaten, modiVon, naechsterPunkt, VORGABE } from "./lib/zuordnung.js";
 import { siehtNachSumoAus, uebertrage, wegeVonLink } from "./lib/uebertrag.js";
 import { winkelAbstand } from "./lib/richtung.js";
+import { tx, setzeSprache, zahl } from "./lib/sprache.js";
 
 const status = (text) => postMessage({ type: "status", text });
-const de = (n) => n.toLocaleString("de-DE");
+const de = (n) => zahl(n);
 
 let netz = null; // { links, proj, metrisch (Links in Metern), index, ids (Link-ID -> Index), name }
 
@@ -123,7 +124,7 @@ function anzeige(links, proj) {
     laenge += f.length;
     n++;
     if (laenge > 1 << 22) flush();
-    if (n % 50000 === 0) status(`Karte vorbereiten: ${de(n)} Links …`);
+    if (n % 50000 === 0) status(tx(`Karte vorbereiten: ${de(n)} Links …`, `Preparing the map: ${de(n)} links …`));
   }
   flush();
   stuecke.push(enc.encode("]}"));
@@ -142,7 +143,7 @@ async function ladeNetz(job) {
   let geometries = null;
   let geoInfo = null;
   if (job.geoBytes) {
-    status("Link-Geometrien lesen …");
+    status(tx("Link-Geometrien lesen …", "Reading link geometries …"));
     const g = await leseLinkGeometrien(job.geoBytes, status);
     geometries = g.map;
     geoInfo = { rows: g.rows, invalid: g.invalid };
@@ -150,10 +151,10 @@ async function ladeNetz(job) {
   const osm = istPbf(job.bytes);
   let r;
   if (osm) {
-    status("OSM-Auszug lesen …");
+    status(tx("OSM-Auszug lesen …", "Reading OSM extract …"));
     r = await leseOsm(job.bytes, { filter: job.osmFilter, status });
   } else {
-    status("MATSim-Netz lesen …");
+    status(tx("MATSim-Netz lesen …", "Reading MATSim network …"));
     r = await leseNetz(job.bytes, geometries, status);
     // OSM-Wege der Links, wenn das Netz sie verrät: für die Übernahme einer Zuordnung aus OSM
     const sumo = siehtNachSumoAus(r.links);
@@ -175,9 +176,9 @@ async function ladeNetz(job) {
   try {
     proj = projektion(crsName);
   } catch (err) {
-    throw new Error(`${crsDatei ? "Das CRS des Netzes" : "Das Koordinatensystem aus dem Formular"}: ${err.message}`);
+    throw new Error(`${crsDatei ? tx("Das CRS des Netzes", "The network's CRS") : tx("Das Koordinatensystem aus dem Formular", "The coordinate system from the form")}: ${err.message}`);
   }
-  status("Karte vorbereiten …");
+  status(tx("Karte vorbereiten …", "Preparing the map …"));
   const karte = anzeige(r.links, proj);
   // Ohne eigenes CRS: wo das Netz mit dem aus dem Formular und mit den üblichen anderen läge. Die
   // Seite zählt die Zählstellen darin und schlägt ein anderes vor, wenn mit diesem keine im Netz liegt.
@@ -236,17 +237,17 @@ async function ladeNetz(job) {
 /** Das Raster über die Links; eine Zelle ist so groß wie der Umkreis, mindestens 50 m. */
 function raster(radius) {
   if (!netz.index || netz.index.zelle !== Math.max(50, radius)) {
-    status("Links in ein Raster legen …");
+    status(tx("Links in ein Raster legen …", "Putting the links into a grid …"));
     netz.index = new LinkIndex(netz.metrisch, Math.max(50, radius));
   }
   return netz.index;
 }
 
 function suche(job) {
-  if (!netz) throw new Error("Es ist noch kein Netz geladen.");
+  if (!netz) throw new Error(tx("Es ist noch kein Netz geladen.", "No network loaded yet."));
   const p = { ...VORGABE, ...job.params };
   raster(p.radius);
-  status("Links zu den Zählstellen suchen …");
+  status(tx("Links zu den Zählstellen suchen …", "Searching links for the count sites …"));
   const ergebnisse = job.stellen.map((s) => {
     const [x, y] = netz.proj.vonWgs(s.lon, s.lat);
     const [mx, my] = netz.meter ? netz.meter.hin(x, y) : [x, y];
@@ -286,13 +287,13 @@ function link(job) {
  * stelle } der Link, der eindeutig passt, sonst der Grund (lib/uebertrag.js).
  */
 function uebernimm(job) {
-  if (!netz) throw new Error("Es ist noch kein Netz geladen.");
+  if (!netz) throw new Error(tx("Es ist noch kein Netz geladen.", "No network loaded yet."));
   const index = raster(VORGABE.radius);
   netz.ids ??= new Map(netz.links.map((l, i) => [l.id, i]));
-  status(`${job.anker.length.toLocaleString("de-DE")} Zuordnungen übernehmen …`);
+  status(tx(`${de(job.anker.length)} Zuordnungen übernehmen …`, `Transferring ${de(job.anker.length)} assignments …`));
   const ergebnisse = job.anker.map((a) => {
     const [x, y] = inMetern(a.lon, a.lat);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return { id: a.id, link: null, wie: null, grund: "der Anker liegt außerhalb des Koordinatensystems" };
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return { id: a.id, link: null, wie: null, grund: tx("der Anker liegt außerhalb des Koordinatensystems", "the anchor lies outside the coordinate system") };
     const r = uebertrage(index, { x, y, grad: a.grad, linkId: a.linkId, weg: a.weg, modi: a.modi }, undefined, netz.ids);
     if (r.i == null) return { id: a.id, link: null, wie: null, grund: r.grund };
     return { id: a.id, wie: r.wie, link: { ...steckbrief(r.i), ...bezug(r.i, a.stelle) }, ankerAbstand: r.d };
@@ -302,6 +303,8 @@ function uebernimm(job) {
 
 onmessage = async (e) => {
   const job = e.data;
+  // die Sprache der Seite für Fortschritt und Meldungen dieses Auftrags
+  setzeSprache(job.sprache);
   try {
     if (job.type === "netz") await ladeNetz(job);
     else if (job.type === "suche") suche(job);

@@ -3,6 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { versetze, leseManifest, leseStellen, stroemePfad, summe, gezaehlteStunden, tagPasst, waehleZaehlungen, punkte, lizenzenVon, strassenName, istKnoten, KURZ_VORGABE } from "../lib/kurzzeit.js";
 import { LinkIndex, kandidaten, verteile } from "../lib/zuordnung.js";
+import { setzeSprache } from "../lib/sprache.js";
+
+// Die Bausteine sprechen hier Deutsch; Englisch prüft sprache.test.mjs
+setzeSprache("de");
 
 const MANIFEST = {
   version: 1,

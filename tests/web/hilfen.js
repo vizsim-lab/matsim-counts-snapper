@@ -9,10 +9,13 @@ export const FIXTURES = "/tests/web/fixtures";
 const FERTIG = "['done','error','idle'].includes(document.getElementById('status').dataset.state)";
 
 export const test = basis.extend({
-  page: async ({ page, baseURL }, use) => {
+  // Die Tests prüfen die deutschen Texte; mit sprache: null gilt die Vorgabe der Seite (Englisch)
+  // und eine Wahl über den Umschalter bleibt beim Neuladen
+  sprache: ["de", { option: true }],
+  page: async ({ page, baseURL, sprache }, use) => {
     const host = new URL(baseURL).host;
     await page.route("**/*", (route) => (new URL(route.request().url()).host === host ? route.continue() : route.abort()));
-    await page.addInitScript(() => {
+    await page.addInitScript((sp) => {
       try {
         // leerer Speicher beim ersten Öffnen; beim Neuladen bleibt er (Gebiet, Entscheidungen)
         if (!sessionStorage.getItem("snapper.test")) {
@@ -20,10 +23,11 @@ export const test = basis.extend({
           sessionStorage.setItem("snapper.test", "1");
         }
         localStorage.setItem("snapper.basemap", "none");
+        if (sp) localStorage.setItem("snapper.sprache", sp);
       } catch {
         /* ohne Speicher */
       }
-    });
+    }, sprache);
     const fehler = [];
     page.on("pageerror", (e) => fehler.push(String(e)));
     await use(page);

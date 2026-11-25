@@ -3,6 +3,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { KONFIG_FORMAT, KONFIG_VERSION, baueKonfiguration, entscheidung, leseKonfiguration } from "../lib/konfig.js";
 import { leseZuordnungCsv, zuordnungCsv } from "../lib/counts.js";
+import { setzeSprache } from "../lib/sprache.js";
+
+// Die Bausteine sprechen hier Deutsch; Englisch prüft sprache.test.mjs
+setzeSprache("de");
 
 const EINSTELLUNGEN = {
   crs: "EPSG:25833",

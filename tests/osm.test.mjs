@@ -7,6 +7,10 @@ import { istPbf, leseOsm, verkehrsmittel } from "../lib/osm.js";
 import { uebertrage, wegeVonLink, siehtNachSumoAus, ohneVorzeichen } from "../lib/uebertrag.js";
 import { LinkIndex } from "../lib/zuordnung.js";
 import { zuordnungCsv, leseZuordnungCsv } from "../lib/counts.js";
+import { setzeSprache } from "../lib/sprache.js";
+
+// Die Bausteine sprechen hier Deutsch; Englisch prüft sprache.test.mjs
+setzeSprache("de");
 
 const KNOTEN = [
   [1, 13.4, 52.5],

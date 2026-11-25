@@ -1,10 +1,19 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MATSim Counts Snapper</title>
-<meta name="description" content="Legt Dauer- und Kurzzeitzählungen der Zählkarte auf die Links eines MATSim-Netzes, mittelt die Stundenwerte der Dauerzählstellen und schreibt counts.xml-Dateien, komplett im Browser.">
+<meta name="description" content="Places permanent and short-term counts of the Zählkarte on the links of a MATSim network, averages the hourly values of the permanent counters and writes counts.xml files, entirely in the browser." data-de-content="Legt Dauer- und Kurzzeitzählungen der Zählkarte auf die Links eines MATSim-Netzes, mittelt die Stundenwerte der Dauerzählstellen und schreibt counts.xml-Dateien, komplett im Browser.">
+<script>
+// Die Sprache vor dem ersten Zeichnen: ?lang=, sonst die gemerkte Wahl, sonst Englisch. Gezeigt wird
+// nur, was zu ihr gehört (data-en / data-de, siehe CSS); app.js übernimmt sie aus <html lang>.
+(() => {
+  let s = new URLSearchParams(location.search).get("lang");
+  try { s ??= localStorage.getItem("snapper.sprache"); } catch { /* ohne Speicher */ }
+  document.documentElement.lang = String(s ?? "").toLowerCase().startsWith("de") ? "de" : "en";
+})();
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23f2b705'/%3E%3Cpath d='M5 22 27 12' fill='none' stroke='%2317202c' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M12 9v8' fill='none' stroke='%2317202c' stroke-width='2' stroke-dasharray='2 2'/%3E%3Ccircle cx='12' cy='8' r='3.5' fill='%2317202c'/%3E%3C/svg%3E">
 <!-- Schriften und Bibliotheken liegen in vendor/: Beim Öffnen gehen keine Anfragen an Schrift- oder CDN-Dienste. -->
 <link rel="stylesheet" href="vendor/fonts/fonts.css">
@@ -61,6 +70,8 @@ html { height: 100%; box-sizing: border-box; }
 *, *::before, *::after { box-sizing: border-box; }
 body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 var(--font-body); }
 [hidden] { display: none !important; }
+/* Zwei Sprachen: feste Texte stehen doppelt da, gezeigt wird die der Seite (<html lang>, gesetzt im Kopf). */
+html[lang="en"] [data-de], html[lang="de"] [data-en] { display: none !important; }
 code { font: 0.92em var(--font-mono); }
 
 .app { display: grid; grid-template-columns: minmax(340px, 430px) minmax(0, 1fr); height: 100%; }
@@ -96,6 +107,10 @@ code { font: 0.92em var(--font-mono); }
 .plate h1 { margin: 0; font: 700 25px/1 var(--font-display); letter-spacing: 0.01em; }
 .plate span { font: 500 12.5px/1.2 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.85; }
 .lede { margin: -8px 0 0; color: var(--muted); font-size: 14px; max-width: 36em; }
+/* der Kopf: Schild links, daneben die Wahl der Sprache */
+.kopf { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 12px; }
+.kopf .sprache { align-self: center; flex: none; }
+.sprache button { padding: 5px 9px; font-size: 12.5px; }
 
 /* Jeder Schritt ein eigener Kasten: oben Nummer und Name, darunter seine Felder. */
 .step { display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--step-bg); }
@@ -290,6 +305,9 @@ code { font: 0.92em var(--font-mono); }
 }
 @media (max-width: 640px) {
   .maplibregl-ctrl-bottom-right { max-width: 100%; }
+  /* Schild und Wahl der Sprache bleiben auch auf schmalen Handys nebeneinander */
+  .plate h1 { font-size: 22px; }
+  .sprache button { padding: 5px 8px; }
   /* die Legende als eine Zeile unten links, damit sie wenig Karte verdeckt */
   .legend { flex-direction: row; flex-wrap: wrap; gap: 3px 10px; max-width: calc(100% - 120px); padding: 5px 8px; font-size: 11.5px; }
   .legend .title { display: none; }
@@ -305,42 +323,49 @@ code { font: 0.92em var(--font-mono); }
 <body>
 <div class="app">
   <aside class="panel">
-    <div class="plate"><h1>MATSim Counts Snapper</h1><span>Zählkarte · Links · counts.xml</span></div>
-    <p class="lede">Legt Dauerzählstellen der <a href="https://vizsim-lab.github.io/zaehlkarte/" target="_blank" rel="noopener">Zählkarte</a> auf die Links eines MATSim-Netzes, mittelt ihre Stundenwerte und schreibt eine <code>counts.xml</code>; wahlweise auch Kurzzeitzählungen je Knotenarm und Fahrtrichtung, in eine eigene Datei. Geprüft werden kann auch auf einem OSM-Auszug: Die Zuordnung lässt sich dann auf jede Netzversion übertragen. Alles läuft im Browser; eigene Dateien verlassen das Gerät nicht.</p>
+    <div class="kopf">
+      <div class="plate"><h1>MATSim Counts Snapper</h1><span>Zählkarte · Links · counts.xml</span></div>
+      <div class="seg sprache" id="sprache" role="group" aria-label="Language" data-de-aria-label="Sprache">
+        <button type="button" value="en" lang="en" title="English" aria-pressed="true">EN</button>
+        <button type="button" value="de" lang="de" title="Deutsch" aria-pressed="false">DE</button>
+      </div>
+    </div>
+    <p class="lede"><span data-en>Places permanent counters of the <a href="https://vizsim-lab.github.io/zaehlkarte/" target="_blank" rel="noopener">Zählkarte</a> on the links of a MATSim network, averages their hourly values and writes a <code>counts.xml</code>; optionally also short-term counts per junction arm and direction, into a separate file. Review also works on an OSM extract: the assignment can then be transferred to any network version. Everything runs in the browser; your own files never leave the device.</span><span data-de>Legt Dauerzählstellen der <a href="https://vizsim-lab.github.io/zaehlkarte/" target="_blank" rel="noopener">Zählkarte</a> auf die Links eines MATSim-Netzes, mittelt ihre Stundenwerte und schreibt eine <code>counts.xml</code>; wahlweise auch Kurzzeitzählungen je Knotenarm und Fahrtrichtung, in eine eigene Datei. Geprüft werden kann auch auf einem OSM-Auszug: Die Zuordnung lässt sich dann auf jede Netzversion übertragen. Alles läuft im Browser; eigene Dateien verlassen das Gerät nicht.</span></p>
 
     <div class="status" id="status" data-state="idle" aria-live="polite">
-      <span class="text" id="status-text">Wartet auf ein Netz.</span>
+      <span class="text" id="status-text"><span data-en>Waiting for a network.</span><span data-de>Wartet auf ein Netz.</span></span>
       <div class="bar" id="bar" hidden><i></i></div>
     </div>
 
     <section class="step" aria-labelledby="h-netz">
-      <h2 id="h-netz"><b>1</b>Netz</h2>
+      <h2 id="h-netz"><b>1</b><span data-en>Network</span><span data-de>Netz</span></h2>
       <label class="drop" id="drop" for="file">
-        <strong>Netz wählen oder hierher ziehen</strong>
-        <small>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code> oder <code>.xml.zst</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>, auch gepackt). Mit Geometrien passen die Abstände besser. Oder ein OSM-Auszug (<code>.osm.pbf</code>): Dann ist das Ergebnis eine Zuordnung, die sich auf jedes MATSim-Netz übertragen lässt; welche Wege daraus kommen, lässt sich danach wählen. Eine Konfiguration (<code>…-snapper-konfiguration.json</code>, aus Schritt 5) stellt Einstellungen und Entscheidungen wieder her, ein Gebiet (GeoJSON, <code>.poly</code>, Shapefile) beschränkt die Zählstellen; beides gern zusammen mit dem Netz.</small>
+        <strong><span data-en>Choose a network or drop it here</span><span data-de>Netz wählen oder hierher ziehen</span></strong>
+        <small data-en>MATSim network (<code>network.xml</code>, <code>.xml.gz</code> or <code>.xml.zst</code>), ideally together with the link geometries (<code>…-linkGeometries.csv</code>, also packed). With geometries the distances fit better. Or an OSM extract (<code>.osm.pbf</code>): the result is then an assignment that can be transferred to any MATSim network; which ways it includes can be chosen afterwards. A configuration (<code>…-snapper-konfiguration.json</code>, from step 5) restores settings and decisions, an area (GeoJSON, <code>.poly</code>, shapefile) limits the count sites; both ideally together with the network.</small>
+        <small data-de>MATSim-Netz (<code>network.xml</code>, <code>.xml.gz</code> oder <code>.xml.zst</code>), gern zusammen mit den Link-Geometrien (<code>…-linkGeometries.csv</code>, auch gepackt). Mit Geometrien passen die Abstände besser. Oder ein OSM-Auszug (<code>.osm.pbf</code>): Dann ist das Ergebnis eine Zuordnung, die sich auf jedes MATSim-Netz übertragen lässt; welche Wege daraus kommen, lässt sich danach wählen. Eine Konfiguration (<code>…-snapper-konfiguration.json</code>, aus Schritt 5) stellt Einstellungen und Entscheidungen wieder her, ein Gebiet (GeoJSON, <code>.poly</code>, Shapefile) beschränkt die Zählstellen; beides gern zusammen mit dem Netz.</small>
         <input type="file" id="file" multiple accept=".xml,.gz,.zst,.csv,.pbf,.json,.geojson,.poly,.zip,.shp,.prj,application/gzip,application/zstd,application/xml,text/xml,text/csv,application/json,application/geo+json,application/zip">
       </label>
       <details class="svn" id="svn">
-        <summary>Aus dem VSP-SVN laden <small>public-svn, countries/de</small></summary>
+        <summary><span data-en>Load from the VSP SVN</span><span data-de>Aus dem VSP-SVN laden</span> <small>public-svn, countries/de</small></summary>
         <div class="svn-body">
-          <nav class="crumbs" id="svn-crumbs" aria-label="Ordner im SVN"></nav>
+          <nav class="crumbs" id="svn-crumbs" aria-label="Folders in the SVN" data-de-aria-label="Ordner im SVN"></nav>
           <ul class="svn-list" id="svn-list"></ul>
           <p class="note" id="svn-note" hidden></p>
           <form class="svn-url" id="svn-url-form">
-            <input type="text" id="svn-url" placeholder="Pfad oder Adresse" spellcheck="false" autocomplete="off" aria-label="Pfad im SVN oder Adresse einer Datei oder eines Ordners">
-            <button class="btn secondary small" type="submit">Öffnen</button>
+            <input type="text" id="svn-url" placeholder="Path or address" data-de-placeholder="Pfad oder Adresse" spellcheck="false" autocomplete="off" aria-label="Path in the SVN or address of a file or folder" data-de-aria-label="Pfad im SVN oder Adresse einer Datei oder eines Ordners">
+            <button class="btn secondary small" type="submit"><span data-en>Open</span><span data-de>Öffnen</span></button>
           </form>
         </div>
       </details>
-      <div class="source" id="source"><span class="note">Noch kein Netz geladen.</span></div>
+      <div class="source" id="source"><span class="note"><span data-en>No network loaded yet.</span><span data-de>Noch kein Netz geladen.</span></span></div>
       <div class="geo" id="geo" hidden>
         <span id="geo-text"></span>
-        <label class="linkbtn">Geometrien wählen<input type="file" id="geo-file" class="visually-hidden" accept=".csv,.gz,.zst,text/csv,application/gzip,application/zstd"></label>
-        <button type="button" class="linkbtn" id="geo-clear" hidden>ohne Geometrien</button>
+        <label class="linkbtn"><span data-en>Choose geometries</span><span data-de>Geometrien wählen</span><input type="file" id="geo-file" class="visually-hidden" accept=".csv,.gz,.zst,text/csv,application/gzip,application/zstd"></label>
+        <button type="button" class="linkbtn" id="geo-clear" hidden><span data-en>without geometries</span><span data-de>ohne Geometrien</span></button>
       </div>
       <div class="fields">
         <div class="field" id="crs-feld">
-          <label for="crs">Koordinatensystem</label>
+          <label for="crs"><span data-en>Coordinate system</span><span data-de>Koordinatensystem</span></label>
           <input type="text" id="crs" value="EPSG:25832" spellcheck="false" autocomplete="off" list="crs-list">
           <datalist id="crs-list">
             <option value="EPSG:25832">ETRS89 / UTM 32N</option>
@@ -353,244 +378,256 @@ code { font: 0.92em var(--font-mono); }
           </datalist>
         </div>
         <div class="field">
-          <span class="label">Beispiel</span>
-          <button type="button" class="btn secondary small" id="beispiel">Berlin laden</button>
+          <span class="label"><span data-en>Example</span><span data-de>Beispiel</span></span>
+          <button type="button" class="btn secondary small" id="beispiel"><span data-en>Load Berlin</span><span data-de>Berlin laden</span></button>
         </div>
         <div class="field wide" id="crs-platzhalter" hidden><small class="warn"></small></div>
         <div class="field wide" id="crs-vorschlag" hidden><small class="warn"></small></div>
-        <div class="field wide" id="crs-hinweis"><small>Das Koordinatensystem gilt, wenn das Netz keins nennt (Attribut <code>coordinateReferenceSystem</code>). Auch proj4-Definitionen gehen, etwa von epsg.io.</small></div>
+        <div class="field wide" id="crs-hinweis"><small data-en>The coordinate system applies when the network names none (attribute <code>coordinateReferenceSystem</code>). proj4 definitions work too, e.g. from epsg.io.</small><small data-de>Das Koordinatensystem gilt, wenn das Netz keins nennt (Attribut <code>coordinateReferenceSystem</code>). Auch proj4-Definitionen gehen, etwa von epsg.io.</small></div>
         <div class="field wide" id="osm-feld">
-          <label for="osm-filter">Wege aus OSM</label>
+          <label for="osm-filter"><span data-en>Ways from OSM</span><span data-de>Wege aus OSM</span></label>
           <select id="osm-filter"></select>
-          <small><span id="osm-filter-text"></span> Gilt beim Lesen eines Auszugs (<code>.osm.pbf</code>); geändert, wird er neu gelesen. Große Gebiete vorher zuschneiden: <code>osmium extract -p gebiet.poly</code>, <code>osmium tags-filter … w/highway</code>.</small>
+          <small><span id="osm-filter-text"></span> <span data-en>Applies when reading an extract (<code>.osm.pbf</code>); when changed, the extract is read again. Cut large areas first: <code>osmium extract -p area.poly</code>, <code>osmium tags-filter … w/highway</code>.</span><span data-de>Gilt beim Lesen eines Auszugs (<code>.osm.pbf</code>); geändert, wird er neu gelesen. Große Gebiete vorher zuschneiden: <code>osmium extract -p gebiet.poly</code>, <code>osmium tags-filter … w/highway</code>.</span></small>
         </div>
       </div>
       <p class="credit" id="credit" hidden></p>
     </section>
 
     <section class="step inactive" id="s-stellen" aria-labelledby="h-stellen">
-      <h2 id="h-stellen"><b>2</b>Zählstellen</h2>
-      <p class="note" id="daten-text">Die Dauerzählstellen der Zählkarte werden geladen …</p>
+      <h2 id="h-stellen"><b>2</b><span data-en>Count sites</span><span data-de>Zählstellen</span></h2>
+      <p class="note" id="daten-text"><span data-en>Loading the permanent counters of the Zählkarte …</span><span data-de>Die Dauerzählstellen der Zählkarte werden geladen …</span></p>
       <div class="field" id="gebiet-feld">
-        <span class="label">Gebiet</span>
+        <span class="label"><span data-en>Area</span><span data-de>Gebiet</span></span>
         <div class="row">
-          <button type="button" class="btn secondary small" id="gebiet-zeichnen" aria-pressed="false">Zeichnen</button>
-          <label class="btn secondary small" for="gebiet-file">Datei laden</label>
+          <button type="button" class="btn secondary small" id="gebiet-zeichnen" aria-pressed="false"><span data-en>Draw</span><span data-de>Zeichnen</span></button>
+          <label class="btn secondary small" for="gebiet-file"><span data-en>Load file</span><span data-de>Datei laden</span></label>
           <input type="file" id="gebiet-file" class="visually-hidden" multiple accept=".geojson,.json,.poly,.zip,.shp,.prj,application/geo+json,application/json,application/zip">
-          <button type="button" class="linkbtn" id="gebiet-zeigen" hidden>zeigen</button>
-          <button type="button" class="linkbtn" id="gebiet-weg" hidden>ganzes Netz</button>
+          <button type="button" class="linkbtn" id="gebiet-zeigen" hidden><span data-en>show</span><span data-de>zeigen</span></button>
+          <button type="button" class="linkbtn" id="gebiet-weg" hidden><span data-en>whole network</span><span data-de>ganzes Netz</span></button>
         </div>
         <small id="gebiet-text"></small>
       </div>
       <dl class="stats" id="auswahl-stats" hidden>
-        <div><dt id="st-gebiet-titel">Im Netzgebiet</dt><dd id="st-gebiet">–</dd></div>
-        <div><dt>Dabei</dt><dd id="st-gerichtet">–</dd></div>
-        <div><dt>Mit Link</dt><dd id="st-link">–</dd></div>
+        <div><dt id="st-gebiet-titel"><span data-en>In network area</span><span data-de>Im Netzgebiet</span></dt><dd id="st-gebiet">–</dd></div>
+        <div><dt><span data-en>Included</span><span data-de>Dabei</span></dt><dd id="st-gerichtet">–</dd></div>
+        <div><dt><span data-en>With link</span><span data-de>Mit Link</span></dt><dd id="st-link">–</dd></div>
       </dl>
       <p class="note" id="auswahl-text" hidden></p>
       <table class="gruppen" id="gruppen">
-        <caption class="visually-hidden">Gruppen der Zählkarte, ihr Verkehrsmittel in der counts.xml und welche Links sie nutzen dürfen</caption>
-        <thead><tr><th scope="col">Gruppe</th><th scope="col">networkMode</th><th scope="col">Link erlaubt</th><th scope="col" class="n">Stellen</th></tr></thead>
+        <caption class="visually-hidden"><span data-en>Groups of the Zählkarte, their mode in the counts.xml and which links they may use</span><span data-de>Gruppen der Zählkarte, ihr Verkehrsmittel in der counts.xml und welche Links sie nutzen dürfen</span></caption>
+        <thead><tr><th scope="col"><span data-en>Group</span><span data-de>Gruppe</span></th><th scope="col">networkMode</th><th scope="col"><span data-en>Link allows</span><span data-de>Link erlaubt</span></th><th scope="col" class="n"><span data-en>Sites</span><span data-de>Stellen</span></th></tr></thead>
         <tbody id="gruppen-body"></tbody>
       </table>
       <p class="hint warn" id="gruppen-hinweis" hidden></p>
-      <p class="hint">Kfz enthält Lkw und Schwerverkehr. Wer Lkw als eigenes Verkehrsmittel simuliert, zählt sie sonst doppelt. „Link erlaubt“: Modi, von denen der Link mindestens einen haben muss.</p>
+      <p class="hint" data-en>Motor vehicles include trucks and heavy vehicles. If you simulate trucks as a mode of their own, you would otherwise count them twice. “Link allows”: modes of which the link must have at least one.</p>
+      <p class="hint" data-de>Kfz enthält Lkw und Schwerverkehr. Wer Lkw als eigenes Verkehrsmittel simuliert, zählt sie sonst doppelt. „Link erlaubt“: Modi, von denen der Link mindestens einen haben muss.</p>
       <div class="fields">
         <div class="field">
-          <label for="radius">Umkreis (m)</label>
+          <label for="radius"><span data-en>Radius (m)</span><span data-de>Umkreis (m)</span></label>
           <input type="number" id="radius" min="5" max="500" step="5" value="50">
         </div>
         <div class="field">
-          <label for="winkel">Richtung, höchstens ± Grad</label>
+          <label for="winkel"><span data-en>Direction, at most ± degrees</span><span data-de>Richtung, höchstens ± Grad</span></label>
           <input type="number" id="winkel" min="10" max="180" step="5" value="60">
         </div>
         <label class="check field wide" for="ohne-kompass">
           <input type="checkbox" id="ohne-kompass" checked>
-          <span>Stellen, die nur ein Ziel nennen („Richtung Lindau“), mitnehmen und zum Prüfen markieren</span>
+          <span data-en>Include sites that only name a destination (“towards Lindau”) and mark them for review</span>
+          <span data-de>Stellen, die nur ein Ziel nennen („Richtung Lindau“), mitnehmen und zum Prüfen markieren</span>
         </label>
       </div>
       <details class="svn kurz" id="kurz">
-        <summary>Kurzzeitzählungen <small id="kurz-sum">aus</small></summary>
+        <summary><span data-en>Short-term counts</span><span data-de>Kurzzeitzählungen</span> <small id="kurz-sum"><span data-en>off</span><span data-de>aus</span></small></summary>
         <div class="svn-body">
           <label class="check" for="kurz-an">
             <input type="checkbox" id="kurz-an">
-            <span>Kurzzeitzählungen der Zählkarte dazunehmen: je Knotenarm eine Zufahrt und eine Ausfahrt, je Querschnitt die Fahrtrichtungen</span>
+            <span data-en>Add the short-term counts of the Zählkarte: per junction arm an approach and an exit, per cross-section the directions</span>
+            <span data-de>Kurzzeitzählungen der Zählkarte dazunehmen: je Knotenarm eine Zufahrt und eine Ausfahrt, je Querschnitt die Fahrtrichtungen</span>
           </label>
-          <p class="note" id="kurz-text">Ein gezählter Tag je Stelle, meist 7 bis 19 Uhr: eine Momentaufnahme. Sie gehen in eine eigene Datei (<code>counts-kurzzeit.xml</code>), jede Messstelle mit Datum, Zählfenster und Art des Tages; auf einem Link gehen Dauerzählstellen vor.</p>
+          <p class="note" id="kurz-text"><span data-en>One counted day per site, usually 7 am to 7 pm: a snapshot. They go into a separate file (<code>counts-kurzzeit.xml</code>), each count station with date, counting window and type of day; on a link, permanent counters take precedence.</span><span data-de>Ein gezählter Tag je Stelle, meist 7 bis 19 Uhr: eine Momentaufnahme. Sie gehen in eine eigene Datei (<code>counts-kurzzeit.xml</code>), jede Messstelle mit Datum, Zählfenster und Art des Tages; auf einem Link gehen Dauerzählstellen vor.</span></p>
           <div class="fields" id="kurz-felder">
             <div class="field">
-              <label for="kurz-von">ab Jahr</label>
+              <label for="kurz-von"><span data-en>from year</span><span data-de>ab Jahr</span></label>
               <input type="number" id="kurz-von" min="1980" max="2100" step="1" value="2019">
             </div>
             <div class="field">
-              <label for="kurz-bis">bis Jahr</label>
-              <input type="number" id="kurz-bis" min="1980" max="2100" step="1" placeholder="jüngstes">
+              <label for="kurz-bis"><span data-en>to year</span><span data-de>bis Jahr</span></label>
+              <input type="number" id="kurz-bis" min="1980" max="2100" step="1" placeholder="latest" data-de-placeholder="jüngstes">
             </div>
             <div class="field wide">
-              <span class="label">Wochentage</span>
-              <div class="tage" id="kurz-wochentage" role="group" aria-label="Wochentage der Kurzzeitzählungen"></div>
+              <span class="label"><span data-en>Weekdays</span><span data-de>Wochentage</span></span>
+              <div class="tage" id="kurz-wochentage" role="group" aria-label="Weekdays of the short-term counts" data-de-aria-label="Wochentage der Kurzzeitzählungen"></div>
             </div>
             <div class="field wide">
-              <span class="label">Montag bis Freitag nur an</span>
+              <span class="label"><span data-en>Monday to Friday only on</span><span data-de>Montag bis Freitag nur an</span></span>
               <div class="row">
-                <label class="check"><input type="checkbox" class="kurz-tag" value="s" checked>Schultagen</label>
-                <label class="check"><input type="checkbox" class="kurz-tag" value="f">Ferientagen</label>
-                <label class="check"><input type="checkbox" class="kurz-tag" value="h">Feiertagen</label>
-                <label class="check"><input type="checkbox" class="kurz-tag" value="u">Tagen ohne Kalender</label>
+                <label class="check"><input type="checkbox" class="kurz-tag" value="s" checked><span data-en>school days</span><span data-de>Schultagen</span></label>
+                <label class="check"><input type="checkbox" class="kurz-tag" value="f"><span data-en>school holidays</span><span data-de>Ferientagen</span></label>
+                <label class="check"><input type="checkbox" class="kurz-tag" value="h"><span data-en>public holidays</span><span data-de>Feiertagen</span></label>
+                <label class="check"><input type="checkbox" class="kurz-tag" value="u"><span data-en>days without a calendar</span><span data-de>Tagen ohne Kalender</span></label>
               </div>
             </div>
             <div class="field wide">
-              <span class="label">Gruppen (networkMode und „Link erlaubt“ wie oben)</span>
+              <span class="label"><span data-en>Groups (networkMode and “Link allows” as above)</span><span data-de>Gruppen (networkMode und „Link erlaubt“ wie oben)</span></span>
               <div class="row" id="kurz-gruppen"></div>
             </div>
             <div class="field wide" id="kurz-lieferungen-feld" hidden>
-              <span class="label">Lieferungen</span>
+              <span class="label"><span data-en>Deliveries</span><span data-de>Lieferungen</span></span>
               <div class="kurz-lieferungen" id="kurz-lieferungen"></div>
-              <small>Lieferungen unter CC BY-SA sind aus, bis man sie einschaltet: Deren Bedingung, die Weitergabe unter gleicher Lizenz, gälte für die ganze Datei.</small>
+              <small data-en>Deliveries under CC BY-SA are off until you switch them on: their condition, sharing under the same licence, would apply to the whole file.</small>
+              <small data-de>Lieferungen unter CC BY-SA sind aus, bis man sie einschaltet: Deren Bedingung, die Weitergabe unter gleicher Lizenz, gälte für die ganze Datei.</small>
             </div>
             <div class="field">
-              <label for="kurz-stunden">Mindestens gezählte Stunden</label>
+              <label for="kurz-stunden"><span data-en>Minimum counted hours</span><span data-de>Mindestens gezählte Stunden</span></label>
               <input type="number" id="kurz-stunden" min="1" max="24" step="1" value="12">
             </div>
             <div class="field">
-              <label for="kurz-abstand">Arm-Punkt vom Knoten (m)</label>
+              <label for="kurz-abstand"><span data-en>Arm point from junction (m)</span><span data-de>Arm-Punkt vom Knoten (m)</span></label>
               <input type="number" id="kurz-abstand" min="10" max="100" step="5" value="25">
             </div>
           </div>
-          <small class="hint">Je Stelle und Gruppe zählt die jüngste Zählung, die passt. Ein Knotenarm wird zu zwei Punkten auf dem Arm: Zufahrt (die Ströme vom Arm) und Ausfahrt (die Ströme zum Arm), mit der Richtung aus dem Winkel des Arms; sie suchen Links nur bis 5 m vor den Knoten. Ein Querschnitt wird je Fahrtrichtung zu einem Punkt an der Stelle. Jeder Punkt liegt 3 m rechts seiner Fahrtrichtung. Nichts wird gemittelt oder hochgerechnet.</small>
+          <small class="hint" data-en>For each site and group, the most recent matching count applies. A junction arm becomes two points on the arm: approach (the movements from the arm) and exit (the movements into the arm), with the direction from the arm's angle; they search links only up to 5 m before the junction. A cross-section becomes one point per direction at the site. Each point lies 3 m to the right of its direction of travel. Nothing is averaged or extrapolated.</small>
+          <small class="hint" data-de>Je Stelle und Gruppe zählt die jüngste Zählung, die passt. Ein Knotenarm wird zu zwei Punkten auf dem Arm: Zufahrt (die Ströme vom Arm) und Ausfahrt (die Ströme zum Arm), mit der Richtung aus dem Winkel des Arms; sie suchen Links nur bis 5 m vor den Knoten. Ein Querschnitt wird je Fahrtrichtung zu einem Punkt an der Stelle. Jeder Punkt liegt 3 m rechts seiner Fahrtrichtung. Nichts wird gemittelt oder hochgerechnet.</small>
         </div>
       </details>
     </section>
 
     <section class="step inactive" id="s-pruefen" aria-labelledby="h-pruefen">
-      <h2 id="h-pruefen"><b>3</b>Prüfen</h2>
-      <div class="seg" id="familie" role="radiogroup" aria-label="Dauer- oder Kurzzeitzählungen" hidden></div>
-      <div class="seg" id="filter" role="radiogroup" aria-label="Welche Stellen die Liste zeigt"></div>
-      <ul class="liste" id="liste" aria-label="Zählstellen"></ul>
+      <h2 id="h-pruefen"><b>3</b><span data-en>Review</span><span data-de>Prüfen</span></h2>
+      <div class="seg" id="familie" role="radiogroup" aria-label="Permanent or short-term counts" data-de-aria-label="Dauer- oder Kurzzeitzählungen" hidden></div>
+      <div class="seg" id="filter" role="radiogroup" aria-label="Which sites the list shows" data-de-aria-label="Welche Stellen die Liste zeigt"></div>
+      <ul class="liste" id="liste" aria-label="Count sites" data-de-aria-label="Zählstellen"></ul>
       <div class="row">
-        <button type="button" class="linkbtn" id="naechste">Nächste zum Prüfen</button>
-        <span class="note" id="tasten">Tasten: <kbd>n</kbd> nächste, <kbd>p</kbd> passt, <kbd>w</kbd> auf der Karte wählen, <kbd>a</kbd> auslassen</span>
+        <button type="button" class="linkbtn" id="naechste"><span data-en>Next to review</span><span data-de>Nächste zum Prüfen</span></button>
+        <span class="note" id="tasten"><span data-en>Keys: <kbd>n</kbd> next, <kbd>p</kbd> accept, <kbd>w</kbd> pick on the map, <kbd>a</kbd> skip</span><span data-de>Tasten: <kbd>n</kbd> nächste, <kbd>p</kbd> passt, <kbd>w</kbd> auf der Karte wählen, <kbd>a</kbd> auslassen</span></span>
       </div>
       <div class="karte" id="karte" hidden></div>
     </section>
 
     <section class="step inactive" id="s-mitteln" aria-labelledby="h-mitteln">
-      <h2 id="h-mitteln"><b>4</b>Mitteln</h2>
+      <h2 id="h-mitteln"><b>4</b><span data-en>Average</span><span data-de>Mitteln</span></h2>
       <div class="field">
-        <span class="label">Wochentage</span>
-        <div class="tage" id="wochentage" role="group" aria-label="Wochentage"></div>
+        <span class="label"><span data-en>Weekdays</span><span data-de>Wochentage</span></span>
+        <div class="tage" id="wochentage" role="group" aria-label="Weekdays" data-de-aria-label="Wochentage"></div>
       </div>
       <div class="fields">
         <div class="field">
-          <label for="von">von</label>
+          <label for="von"><span data-en>from</span><span data-de>von</span></label>
           <input type="date" id="von">
         </div>
         <div class="field">
-          <label for="bis">bis</label>
+          <label for="bis"><span data-en>to</span><span data-de>bis</span></label>
           <input type="date" id="bis">
         </div>
         <div class="field wide">
-          <span class="label">Montag bis Freitag nur an</span>
+          <span class="label"><span data-en>Monday to Friday only on</span><span data-de>Montag bis Freitag nur an</span></span>
           <div class="row">
-            <label class="check"><input type="checkbox" class="tagesart" value="s" checked>Schultagen</label>
-            <label class="check"><input type="checkbox" class="tagesart" value="f">Ferientagen</label>
-            <label class="check"><input type="checkbox" class="tagesart" value="h">Feiertagen</label>
-            <label class="check"><input type="checkbox" class="tagesart" value="u">Tagen ohne Kalender</label>
+            <label class="check"><input type="checkbox" class="tagesart" value="s" checked><span data-en>school days</span><span data-de>Schultagen</span></label>
+            <label class="check"><input type="checkbox" class="tagesart" value="f"><span data-en>school holidays</span><span data-de>Ferientagen</span></label>
+            <label class="check"><input type="checkbox" class="tagesart" value="h"><span data-en>public holidays</span><span data-de>Feiertagen</span></label>
+            <label class="check"><input type="checkbox" class="tagesart" value="u"><span data-en>days without a calendar</span><span data-de>Tagen ohne Kalender</span></label>
           </div>
         </div>
         <div class="field">
-          <span class="label">Je Stunde</span>
-          <div class="seg" id="statistik" role="radiogroup" aria-label="Statistik je Stunde">
-            <button type="button" role="radio" value="mittel" aria-checked="true">Mittel</button>
+          <span class="label"><span data-en>Per hour</span><span data-de>Je Stunde</span></span>
+          <div class="seg" id="statistik" role="radiogroup" aria-label="Statistic per hour" data-de-aria-label="Statistik je Stunde">
+            <button type="button" role="radio" value="mittel" aria-checked="true"><span data-en>Mean</span><span data-de>Mittel</span></button>
             <button type="button" role="radio" value="median" aria-checked="false">Median</button>
           </div>
         </div>
         <div class="field">
-          <label for="min-tage">Mindestens Tage je Stunde</label>
+          <label for="min-tage"><span data-en>Minimum days per hour</span><span data-de>Mindestens Tage je Stunde</span></label>
           <input type="number" id="min-tage" min="1" max="366" step="1" value="5">
         </div>
         <label class="check field wide" for="vollstaendig">
           <input type="checkbox" id="vollstaendig" checked>
-          <span>Nur ganze Tagesgänge, alle 24 Stunden (wie MATSims BASt-Werkzeug)</span>
+          <span data-en>Only complete daily profiles, all 24 hours (like MATSim's BASt tool)</span>
+          <span data-de>Nur ganze Tagesgänge, alle 24 Stunden (wie MATSims BASt-Werkzeug)</span>
         </label>
       </div>
       <p class="note" id="zeitraum-text"></p>
       <div class="row" id="laden-row">
-        <button type="button" class="btn secondary small" id="stunden-laden">Stundenwerte laden</button>
+        <button type="button" class="btn secondary small" id="stunden-laden"><span data-en>Load hourly values</span><span data-de>Stundenwerte laden</span></button>
         <span class="note" id="stunden-text"></span>
       </div>
       <p class="note" id="mittel-text" hidden></p>
     </section>
 
     <section class="step inactive" id="s-ausgeben" aria-labelledby="h-ausgeben">
-      <h2 id="h-ausgeben"><b>5</b>Ausgeben</h2>
+      <h2 id="h-ausgeben"><b>5</b><span data-en>Output</span><span data-de>Ausgeben</span></h2>
       <div class="fields">
         <div class="field wide">
           <label for="counts-name">Name</label>
           <input type="text" id="counts-name" value="" spellcheck="false" autocomplete="off">
         </div>
         <div class="field">
-          <label for="jahr">Jahr</label>
+          <label for="jahr"><span data-en>Year</span><span data-de>Jahr</span></label>
           <input type="number" id="jahr" min="1990" max="2100" step="1">
         </div>
         <label class="check field" for="nur-geprueft" style="align-self: end">
           <input type="checkbox" id="nur-geprueft">
-          <span>nur geprüfte Stellen</span>
+          <span data-en>reviewed sites only</span>
+          <span data-de>nur geprüfte Stellen</span>
         </label>
       </div>
       <div class="row">
         <button type="button" class="btn" id="counts-xml" disabled>counts.xml</button>
         <button type="button" class="btn secondary" id="counts-gz" disabled>.xml.gz</button>
-        <button type="button" class="btn secondary" id="zuordnung-csv" disabled>Zuordnung (CSV)</button>
+        <button type="button" class="btn secondary" id="zuordnung-csv" disabled><span data-en>Assignment (CSV)</span><span data-de>Zuordnung (CSV)</span></button>
       </div>
       <div class="row" id="kurz-export" hidden>
         <button type="button" class="btn" id="kurz-xml" disabled>counts-kurzzeit.xml</button>
         <button type="button" class="btn secondary" id="kurz-gz" disabled>.xml.gz</button>
-        <span class="note">Kurzzeitzählungen: je Messstelle ein Tag, nur die gezählten Stunden. Nach Stunden vergleichen, nicht über den Tag.</span>
+        <span class="note" data-en>Short-term counts: one day per count station, only the counted hours. Compare by hour, not over the day.</span>
+        <span class="note" data-de>Kurzzeitzählungen: je Messstelle ein Tag, nur die gezählten Stunden. Nach Stunden vergleichen, nicht über den Tag.</span>
       </div>
       <p class="note" id="export-text" hidden></p>
-      <p class="note" id="osm-export" hidden>Aus einem OSM-Auszug gibt es keine <code>counts.xml</code>: Die Kanten gehören zu keinem MATSim-Netz. Die Zuordnung (CSV) trägt je Stelle den Punkt auf der Straße, die Richtung und den OSM-Weg; mit einem MATSim-Netz geladen, wird sie dort übernommen.</p>
-      <p class="note">Die Zuordnung ist eine CSV im Format von MATSims <code>--counts-mapping</code>: Station, <code>linkid</code>, <code>using</code>, Kommentar, dazu wie der Link zustande kam und sein Anker – der Punkt auf dem Link, seine Richtung und der OSM-Weg. Wieder eingelesen, auch zu einem anderen Netz oder aus OSM, überträgt sie die geprüften Links über den Anker: gleiche Link-ID am selben Ort, gleicher OSM-Weg in derselben Richtung oder der einzige passende Link am Punkt. Was so nicht eindeutig ist, kommt zum Prüfen; ausgelassene Stellen bleiben ausgelassen.
-        <label class="linkbtn">Zuordnung laden<input type="file" id="csv-file" class="visually-hidden" accept=".csv,text/csv"></label></p>
+      <p class="note" id="osm-export" hidden><span data-en>An OSM extract gives no <code>counts.xml</code>: its edges belong to no MATSim network. The assignment (CSV) carries per site the point on the road, the direction and the OSM way; loaded with a MATSim network, it is transferred there.</span><span data-de>Aus einem OSM-Auszug gibt es keine <code>counts.xml</code>: Die Kanten gehören zu keinem MATSim-Netz. Die Zuordnung (CSV) trägt je Stelle den Punkt auf der Straße, die Richtung und den OSM-Weg; mit einem MATSim-Netz geladen, wird sie dort übernommen.</span></p>
+      <p class="note"><span data-en>The assignment is a CSV in the format of MATSim's <code>--counts-mapping</code>: station, <code>linkid</code>, <code>using</code>, comment, plus how the link came about and its anchor – the point on the link, its direction and the OSM way. Read back in, also with another network or from OSM, it transfers the reviewed links via the anchor: same link ID at the same place, same OSM way in the same direction or the only matching link at the point. What is not unique that way goes to review; skipped sites stay skipped.</span><span data-de>Die Zuordnung ist eine CSV im Format von MATSims <code>--counts-mapping</code>: Station, <code>linkid</code>, <code>using</code>, Kommentar, dazu wie der Link zustande kam und sein Anker – der Punkt auf dem Link, seine Richtung und der OSM-Weg. Wieder eingelesen, auch zu einem anderen Netz oder aus OSM, überträgt sie die geprüften Links über den Anker: gleiche Link-ID am selben Ort, gleicher OSM-Weg in derselben Richtung oder der einzige passende Link am Punkt. Was so nicht eindeutig ist, kommt zum Prüfen; ausgelassene Stellen bleiben ausgelassen.</span>
+        <label class="linkbtn"><span data-en>Load assignment</span><span data-de>Zuordnung laden</span><input type="file" id="csv-file" class="visually-hidden" accept=".csv,text/csv"></label></p>
       <div class="row">
-        <button type="button" class="btn secondary" id="konfig-json" disabled>Konfiguration (JSON)</button>
-        <label class="linkbtn">Konfiguration laden<input type="file" id="konfig-file" class="visually-hidden" accept=".json,application/json"></label>
+        <button type="button" class="btn secondary" id="konfig-json" disabled><span data-en>Configuration (JSON)</span><span data-de>Konfiguration (JSON)</span></button>
+        <label class="linkbtn"><span data-en>Load configuration</span><span data-de>Konfiguration laden</span><input type="file" id="konfig-file" class="visually-hidden" accept=".json,application/json"></label>
       </div>
-      <p class="note">Die Konfiguration hält fest, wie die Ausgabe entstand: welches Netz (Datei oder Adresse, CRS, Zahl der Links, Gebiet), welcher Stand der Zählkarte, alle Einstellungen der Schritte 1 bis 5, die Quellen und die Entscheidungen von Hand – geprüfte Links mit Anker, ausgelassene Stellen, Kommentare. Wieder eingelesen stellt sie die Einstellungen her, lädt ihr Netz, wenn keins geladen ist und sie seine Adresse kennt, und überträgt die Entscheidungen wie die Zuordnung, auch auf ein anderes Netz.</p>
+      <p class="note" data-en>The configuration records how the output came about: which network (file or address, CRS, number of links, area), which version of the Zählkarte, all settings of steps 1 to 5, the sources and the decisions by hand – reviewed links with anchor, skipped sites, comments. Read back in, it restores the settings, loads its network if none is loaded and it knows the address, and transfers the decisions like the assignment, also to another network.</p>
+      <p class="note" data-de>Die Konfiguration hält fest, wie die Ausgabe entstand: welches Netz (Datei oder Adresse, CRS, Zahl der Links, Gebiet), welcher Stand der Zählkarte, alle Einstellungen der Schritte 1 bis 5, die Quellen und die Entscheidungen von Hand – geprüfte Links mit Anker, ausgelassene Stellen, Kommentare. Wieder eingelesen stellt sie die Einstellungen her, lädt ihr Netz, wenn keins geladen ist und sie seine Adresse kennt, und überträgt die Entscheidungen wie die Zuordnung, auch auf ein anderes Netz.</p>
       <div class="field" id="quellen-box" hidden>
-        <span class="label">Quellen und Lizenzen in der Ausgabe</span>
+        <span class="label"><span data-en>Sources and licences in the output</span><span data-de>Quellen und Lizenzen in der Ausgabe</span></span>
         <ul class="quellen" id="quellen"></ul>
-        <small>Die Bedingungen der Lizenzen gelten auch für die counts.xml. Quellen ohne Lizenz nimmt die Seite nie auf.</small>
+        <small data-en>The licence conditions also apply to the counts.xml. The page never includes sources without a licence.</small>
+        <small data-de>Die Bedingungen der Lizenzen gelten auch für die counts.xml. Quellen ohne Lizenz nimmt die Seite nie auf.</small>
       </div>
     </section>
 
     <footer class="foot">
-      <p>Daten: <a href="https://github.com/vizsim-lab/zaehlkarte" target="_blank" rel="noopener">Zählkarte</a> (Dauerzählstellen, Kurzzeitzählungen je Strom). Netz lesen wie in <a href="https://github.com/vizsim-lab/kachelwerk" target="_blank" rel="noopener">kachelwerk</a>, Karte mit <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre GL JS</a> und <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a>, Umrechnung mit <a href="https://github.com/proj4js/proj4js" target="_blank" rel="noopener">proj4js</a>.</p>
-      <p><a href="https://github.com/vizsim-lab/matsim-counts-snapper" target="_blank" rel="noopener">Quellcode</a> und <a href="https://github.com/vizsim-lab/matsim-counts-snapper/blob/main/THIRD_PARTY_LICENSES.md" target="_blank" rel="noopener">Lizenzen</a> auf GitHub.</p>
+      <p data-en>Data: <a href="https://github.com/vizsim-lab/zaehlkarte" target="_blank" rel="noopener">Zählkarte</a> (permanent counters, short-term counts per movement). Network reading as in <a href="https://github.com/vizsim-lab/kachelwerk" target="_blank" rel="noopener">kachelwerk</a>, map with <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre GL JS</a> and <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a>, reprojection with <a href="https://github.com/proj4js/proj4js" target="_blank" rel="noopener">proj4js</a>.</p>
+      <p data-de>Daten: <a href="https://github.com/vizsim-lab/zaehlkarte" target="_blank" rel="noopener">Zählkarte</a> (Dauerzählstellen, Kurzzeitzählungen je Strom). Netz lesen wie in <a href="https://github.com/vizsim-lab/kachelwerk" target="_blank" rel="noopener">kachelwerk</a>, Karte mit <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre GL JS</a> und <a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a>, Umrechnung mit <a href="https://github.com/proj4js/proj4js" target="_blank" rel="noopener">proj4js</a>.</p>
+      <p data-en><a href="https://github.com/vizsim-lab/matsim-counts-snapper" target="_blank" rel="noopener">Source code</a> and <a href="https://github.com/vizsim-lab/matsim-counts-snapper/blob/main/THIRD_PARTY_LICENSES.md" target="_blank" rel="noopener">licences</a> on GitHub.</p>
+      <p data-de><a href="https://github.com/vizsim-lab/matsim-counts-snapper" target="_blank" rel="noopener">Quellcode</a> und <a href="https://github.com/vizsim-lab/matsim-counts-snapper/blob/main/THIRD_PARTY_LICENSES.md" target="_blank" rel="noopener">Lizenzen</a> auf GitHub.</p>
     </footer>
   </aside>
 
   <main class="mapwrap" id="mapwrap">
-    <div id="map" role="region" aria-label="Karte mit Netz und Zählstellen"></div>
-    <div class="basemap" id="basemap" role="group" aria-label="Hintergrundkarte (OpenFreeMap)">
+    <div id="map" role="region" aria-label="Map with network and count sites" data-de-aria-label="Karte mit Netz und Zählstellen"></div>
+    <div class="basemap" id="basemap" role="group" aria-label="Background map (OpenFreeMap)" data-de-aria-label="Hintergrundkarte (OpenFreeMap)">
       <button type="button" value="positron" aria-pressed="false">Positron</button>
       <button type="button" value="dark" aria-pressed="false">Dark</button>
-      <button type="button" value="none" aria-pressed="false">Ohne</button>
+      <button type="button" value="none" aria-pressed="false"><span data-en>None</span><span data-de>Ohne</span></button>
       <span class="basemap-err" id="basemap-error" hidden></span>
     </div>
     <div class="busy" id="busy" hidden></div>
-    <div class="pickhint" id="pickhint" hidden>Klicke den Link, auf dem die Stelle zählt. <kbd>Esc</kbd> bricht ab.</div>
-    <div class="pickhint" id="gebiethint" hidden>Ecken klicken · Doppelklick oder erste Ecke schließt · <kbd>⌫</kbd> zurück · <kbd>Esc</kbd> bricht ab</div>
+    <div class="pickhint" id="pickhint" hidden><span data-en>Click the link the site counts on. <kbd>Esc</kbd> cancels.</span><span data-de>Klicke den Link, auf dem die Stelle zählt. <kbd>Esc</kbd> bricht ab.</span></div>
+    <div class="pickhint" id="gebiethint" hidden><span data-en>Click corners · double-click or first corner closes · <kbd>⌫</kbd> back · <kbd>Esc</kbd> cancels</span><span data-de>Ecken klicken · Doppelklick oder erste Ecke schließt · <kbd>⌫</kbd> zurück · <kbd>Esc</kbd> bricht ab</span></div>
     <div class="legend" id="legend" hidden>
-      <span class="title">Zählstellen</span>
-      <span class="lg"><i style="--c: var(--st-passt)"></i>passt</span>
-      <span class="lg"><i style="--c: var(--st-pruefen)"></i>prüfen</span>
-      <span class="lg"><i style="--c: var(--st-geprueft)"></i>geprüft</span>
-      <span class="lg"><i style="--c: var(--st-ohne)"></i>ohne Link</span>
-      <span class="lg"><i style="--c: var(--st-aus)"></i>ausgelassen</span>
-      <span class="lg" id="legend-quer" hidden title="zählt beide Richtungen zusammen oder nennt keine: passt auf keinen einzelnen Link"><i style="--c: var(--st-quer)"></i>beide Richtungen, nur angezeigt</span>
-      <span class="lg" id="legend-kurz" hidden><i class="ring" style="--c: var(--fg)"></i>Kurzzeitzählung</span>
-      <span class="lg"><i class="ln dash" style="--c: var(--fg)"></i>Kandidaten</span>
+      <span class="title"><span data-en>Count sites</span><span data-de>Zählstellen</span></span>
+      <span class="lg"><i style="--c: var(--st-passt)"></i><span data-en>matched</span><span data-de>passt</span></span>
+      <span class="lg"><i style="--c: var(--st-pruefen)"></i><span data-en>to review</span><span data-de>prüfen</span></span>
+      <span class="lg"><i style="--c: var(--st-geprueft)"></i><span data-en>reviewed</span><span data-de>geprüft</span></span>
+      <span class="lg"><i style="--c: var(--st-ohne)"></i><span data-en>no link</span><span data-de>ohne Link</span></span>
+      <span class="lg"><i style="--c: var(--st-aus)"></i><span data-en>skipped</span><span data-de>ausgelassen</span></span>
+      <span class="lg" id="legend-quer" hidden title="counts both directions together or names none: fits no single link" data-de-title="zählt beide Richtungen zusammen oder nennt keine: passt auf keinen einzelnen Link"><i style="--c: var(--st-quer)"></i><span data-en>both directions, shown only</span><span data-de>beide Richtungen, nur angezeigt</span></span>
+      <span class="lg" id="legend-kurz" hidden><i class="ring" style="--c: var(--fg)"></i><span data-en>short-term count</span><span data-de>Kurzzeitzählung</span></span>
+      <span class="lg"><i class="ln dash" style="--c: var(--fg)"></i><span data-en>candidates</span><span data-de>Kandidaten</span></span>
     </div>
   </main>
 </div>

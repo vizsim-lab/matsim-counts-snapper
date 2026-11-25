@@ -12,6 +12,13 @@ ein Server ist nicht nötig, und eigene Dateien verlassen den Rechner nicht.
 Ohne Angabe lädt die Seite ein Beispiel: das alte Berliner Netz aus matsim-libs und die Berliner
 Detektoren der Verkehrsinformationszentrale.
 
+Die Oberfläche spricht Englisch (Vorgabe) oder Deutsch: Der Umschalter steht neben dem Titel,
+der Browser merkt sich die Wahl, und `?lang=de` in der Adresse öffnet die Seite auf Deutsch. Der
+Wechsel lädt nichts neu, ein geladenes Netz und alle Entscheidungen bleiben. Die Ausgaben
+(counts.xml, Zuordnung, Konfiguration) sind in beiden Sprachen dieselben Dateien, mit deutschen
+Attributen und Werten wie bisher; Texte aus den Daten der Zählkarte (Namen, Richtungen, Quellen)
+bleiben, wie die Zählkarte sie schreibt.
+
 ## Ablauf
 
 1. **Netz:** `network.xml` (auch `.xml.gz` oder `.xml.zst`) von der Festplatte oder aus dem
@@ -371,6 +378,8 @@ Die Adresszeile zeigt auf das geladene Netz und lässt sich teilen, zum Beispiel
 - `crs`: nur nötig, wenn das Netz keins nennt und es nicht `EPSG:25832` ist
 - `daten`: ein anderer Ort für die Daten der Zählkarte (Ordner mit `dauer/`, für die
   Kurzzeitzählungen mit `manifest.json`, `index.json` und `stroeme/`)
+- `lang`: `de` für die deutsche Oberfläche; ohne den Parameter gilt die gemerkte Wahl, sonst
+  Englisch. Die Seite setzt ihn selbst, solange Deutsch gewählt ist.
 
 ## Gepackte Dateien
 
@@ -419,7 +428,10 @@ Nach draußen geht keine Anfrage. Sie prüfen den ganzen Ablauf: welche Stelle a
 die Ausgaben gegen erwartete Dateien in `tests/web/erwartet/` (nach einer gewollten Änderung neu
 schreiben mit `ERWARTET_NEU=1 npm run test:web`), ein Mittel von Hand nachgerechnet, Konfiguration
 hin und zurück, das Gebiet, Kurzzeitzählungen, die Übernahme aus einem OSM-Auszug, ein Netz ohne
-CRS nach dem Beispiel samt Vorschlag und eine Hintergrundkarte, die nicht lädt.
+CRS nach dem Beispiel samt Vorschlag, eine Hintergrundkarte, die nicht lädt, und die Sprachen: Die
+übrigen Tests laufen auf Deutsch, `tests/web/sprache.spec.js` prüft Englisch als Vorgabe, den
+Wechsel ohne Neuladen, dass in der englischen Oberfläche kein deutsches Wort stehen bleibt und dass
+die Ausgaben in beiden Sprachen gleich sind.
 
 Der Workflow „Prüfen und veröffentlichen“ (`.github/workflows/pruefen.yml`) führt beide bei jedem
 Push und Pull Request aus. Auf `main` veröffentlicht er danach die Seite, sobald GitHub Pages auf
@@ -437,6 +449,9 @@ veröffentlicht, geht die Seite ohne Tests online, und der Workflow sagt das als
 - `lib/crs.js`: Koordinatensysteme (proj4), auch MATSim-Namen wie `DHDN_GK4`; wo ein Netz ohne CRS
   mit den üblichen läge
 - `lib/crsvorschlag.js`: welches CRS die Seite einem Netz ohne eigenes vorschlägt
+- `lib/sprache.js`: die Sprache der Oberfläche, Texte als `tx("Deutsch", "English")`, Zahlen je
+  Sprache; feste Texte stehen in `index.html` doppelt (`data-en`, `data-de`), Attribute als
+  `data-de-title` und so weiter
 - `lib/zuordnung.js`: Raster über die Links, Kandidaten, jeder Link nur einmal
 - `lib/richtung.js`: die Richtung aus dem Text der Zählkarte
 - `lib/zaehlkarte.js`: `dauer/index.json` und die Stundenwerte lesen, Ferienkalender
