@@ -4,7 +4,8 @@
 //
 // Gitter: 4 Spalten × 3 Reihen, 300 m Abstand, Knoten k{Spalte}{Reihe}. Jede Strecke in beide
 // Richtungen; die mittlere Reihe („Mittelweg“) nur für car, alle anderen für car und bike.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { gzipSync, zstdCompressSync } from "node:zlib";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { projektion } from "../../../lib/crs.js";
@@ -51,6 +52,11 @@ ${links.map((l) => `\t\t<link id="${l.id}" from="${l.von}" to="${l.nach}" length
 \t</links>
 </network>
 `);
+
+// dasselbe Netz gepackt: gzip und Zstandard (MATSim mit compressionType = zst)
+const netzXml = readFileSync(join(HIER, "netz.xml"));
+schreibe("netz.xml.gz", gzipSync(netzXml, { level: 9 }));
+schreibe("netz.xml.zst", zstdCompressSync(netzXml));
 
 // ---------- dasselbe Gitter als OSM-Auszug ----------
 const osmId = (k) => 1000 + k.c * 10 + k.r;

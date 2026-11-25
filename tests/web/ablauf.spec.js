@@ -1,6 +1,7 @@
 // Der Ablauf mit dem MATSim-Netz der Testdaten: welche Stelle an welchen Link kommt, was Schritt 2
 // sagt, welche Felder Schritt 1 zeigt, und die Ausgaben gegen erwartete Dateien.
-import { test, expect, oeffne, stand, lade, wieErwartet } from "./hilfen.js";
+import { readFileSync } from "node:fs";
+import { test, expect, oeffne, fertig, stand, lade, wieErwartet } from "./hilfen.js";
 
 const STELLEN = {
   "test_viz:D1": ["dauer", "passt", "k00-k10"],
@@ -24,6 +25,22 @@ test("MATSim-Netz: Stellen, Schritt 2 und Formular", async ({ page, baseURL }) =
   await expect(page.locator("#osm-feld")).toBeHidden();
   await expect(page.locator("section.step")).toHaveCount(5);
   await expect(page.locator("#konfig-json")).toBeEnabled();
+});
+
+test("gepackte Netze: .xml.gz und .xml.zst wie .xml, über die Adresse und als Datei", async ({ page, baseURL }) => {
+  for (const netz of ["netz.xml.gz", "netz.xml.zst"]) {
+    await oeffne(page, baseURL, { netz });
+    expect(await stand(page), netz).toEqual(STELLEN);
+    await expect(page.locator("#source")).toContainText(netz);
+    wieErwartet("counts.xml", (await lade(page, "#counts-xml")).text.replaceAll(`fixtures/${netz}`, "fixtures/netz.xml"));
+  }
+  await page.setInputFiles("#file", "tests/web/fixtures/netz.xml.zst");
+  await fertig(page);
+  expect(await stand(page)).toEqual(STELLEN);
+  // abgeschnitten: eine klare Meldung statt eines halben Netzes
+  const voll = readFileSync("tests/web/fixtures/netz.xml.zst");
+  await page.setInputFiles("#file", { name: "halb.xml.zst", mimeType: "application/zstd", buffer: voll.subarray(0, Math.floor(voll.length / 2)) });
+  await expect(page.locator("#status-text")).toContainText("Die Zstandard-Datei lässt sich nicht entpacken");
 });
 
 test("Ausgaben wie erwartet, Mittel nachgerechnet", async ({ page, baseURL }) => {
