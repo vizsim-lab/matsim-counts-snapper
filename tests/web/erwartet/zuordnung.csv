@@ -1,0 +1,8 @@
+station;linkid;using;kommentar;zuordnung;abstand_m;richtung;name;quelle;anker_lon;anker_lat;anker_grad;osm_weg;netz;zaehlart
+test_rad:R1;k20-k21;y;;automatisch;6;Richtung Norden;Querweg 2;test_rad;13.3879305;52.5114775;359;202;netz.xml;dauer
+test_rad:R2;;;;ohne Link;;Richtung Osten;Mittelweg;test_rad;;;;;;dauer
+test_viz:D1;k00-k10;y;;automatisch;6;Richtung Osten;Hauptstraße;test_viz;13.3813519;52.5100390;89;100;netz.xml;dauer
+test_viz:D2;k10-k00;y;;automatisch;6;Richtung Westen;Hauptstraße;test_viz;13.3813518;52.5100390;269;100;netz.xml;dauer
+test_viz:D3;k10-k11;y;;automatisch;6;Richtung Norden;Querweg 1;test_viz;13.3835115;52.5114172;359;201;netz.xml;dauer
+test_viz:D4;;;;ohne Link;;Richtung Osten;Hinterhof;test_viz;;;;;;dauer
+test_viz:D5;k31-k30;y;;automatisch;6;Richtung Süden;Querweg 3;test_viz;13.3923490;52.5115376;179;203;netz.xml;dauer

@@ -1,0 +1,47 @@
+{
+ "version": 1,
+ "erzeugt": "2026-11-19",
+ "dateien": {
+  "index": "index.json",
+  "details": "details/{n}.json",
+  "stroeme": "stroeme/{quelle}-{jahr}.json"
+ },
+ "stroeme": {
+  "test": [
+   2024
+  ]
+ },
+ "gruppen": [
+  {
+   "id": "kfz",
+   "name": "Kfz"
+  },
+  {
+   "id": "sv",
+   "name": "Schwerverkehr"
+  },
+  {
+   "id": "rad",
+   "name": "Rad"
+  },
+  {
+   "id": "fuss",
+   "name": "Fuß"
+  }
+ ],
+ "quellen": [
+  {
+   "code": "test",
+   "name": "Teststadt",
+   "land": "BE",
+   "lizenzen": [
+    {
+     "code": "2024",
+     "titel": "Zählungen 2024",
+     "lizenz": "dl-de/by-2-0",
+     "lizenz_url": "https://www.govdata.de/dl-de/by-2-0"
+    }
+   ]
+  }
+ ]
+}

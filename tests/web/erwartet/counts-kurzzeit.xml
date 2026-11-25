@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<counts xmlns="http://www.matsim.org/files/dtd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.matsim.org/files/dtd http://www.matsim.org/files/dtd/counts_v2.xsd" source="Zählkarte (vizsim-lab), Kurzzeitzählungen" name="Zählkarte netz, Kurzzeitzählungen" description="je Stelle und Gruppe die jüngste Zählung 2019 bis 2024 an Di, Mi, Do (Mo–Fr nur Schultage) mit mindestens 12 gezählten Stunden; ein Tag, nur die gezählten Stunden, kein Mittel" year="2025">
+	<attributes>
+		<attribute name="erstellt_mit" class="java.lang.String">matsim-counts-snapper, https://github.com/vizsim-lab/matsim-counts-snapper</attribute>
+		<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+		<attribute name="zaehlkarte" class="java.lang.String">Kurzzeitzählungen der Zählkarte (vizsim-lab) je Strom, Stand 2026-11-19, http://127.0.0.1:4173/tests/web/fixtures/zaehlkarte/stroeme/</attribute>
+		<attribute name="netz" class="java.lang.String">http://127.0.0.1:4173/tests/web/fixtures/netz.xml</attribute>
+		<attribute name="auswahl" class="java.lang.String">je Stelle und Gruppe die jüngste Zählung 2019 bis 2024 an Di, Mi, Do (Mo–Fr nur Schultage) mit mindestens 12 gezählten Stunden; ein Tag, nur die gezählten Stunden, kein Mittel</attribute>
+		<attribute name="hinweis" class="java.lang.String">Je Messstelle ein gezählter Tag (Datum, Zählfenster und Art des Tages in ihren Attributen), nur die gezählten Stunden, meist 7 bis 19 Uhr. Eine Tagessumme ist nur die Summe des Zählfensters. Nach Stunden vergleichen, nicht über den Tag.</attribute>
+		<attribute name="arm_abstand_m" class="java.lang.Integer">25</attribute>
+		<attribute name="min_stunden" class="java.lang.Integer">12</attribute>
+		<attribute name="gruppen" class="java.lang.String">kfz=car</attribute>
+		<attribute name="quelle_test" class="java.lang.String">Teststadt; dl-de/by-2-0 (Zählungen 2024) https://www.govdata.de/dl-de/by-2-0</attribute>
+	</attributes>
+
+	<location refId="k11-k01" id="test:K1/K1_20240611/1aus" name="Mittelweg / Querweg 1" x="390275.0" y="5819303.57">
+		<attributes>
+			<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+			<attribute name="quelle" class="java.lang.String">test</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="stelle" class="java.lang.String">test:K1</attribute>
+			<attribute name="zaehlung" class="java.lang.String">K1_20240611</attribute>
+			<attribute name="datum" class="java.lang.String">2024-06-11</attribute>
+			<attribute name="wochentag" class="java.lang.String">Di</attribute>
+			<attribute name="tagtyp" class="java.lang.String">Schultag</attribute>
+			<attribute name="fenster" class="java.lang.String">7–19</attribute>
+			<attribute name="art" class="java.lang.String">Knoten</attribute>
+			<attribute name="arm" class="java.lang.String">1 Mittelweg (W)</attribute>
+			<attribute name="seite" class="java.lang.String">Ausfahrt</attribute>
+			<attribute name="stroeme" class="java.lang.String">2→1, 3→1, 4→1</attribute>
+			<attribute name="richtung_grad" class="java.lang.Integer">270</attribute>
+			<attribute name="gruppen" class="java.lang.String">Kfz=car</attribute>
+			<attribute name="lage" class="java.lang.String">gps</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">3.6</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="25200" val="93.0"/>
+			<value t="28800" val="96.0"/>
+			<value t="32400" val="99.0"/>
+			<value t="36000" val="102.0"/>
+			<value t="39600" val="105.0"/>
+			<value t="43200" val="108.0"/>
+			<value t="46800" val="111.0"/>
+			<value t="50400" val="114.0"/>
+			<value t="54000" val="117.0"/>
+			<value t="57600" val="120.0"/>
+			<value t="61200" val="123.0"/>
+			<value t="64800" val="126.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k01-k11" id="test:K1/K1_20240611/1zu" name="Mittelweg / Querweg 1" x="390274.86" y="5819297.56">
+		<attributes>
+			<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+			<attribute name="quelle" class="java.lang.String">test</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="stelle" class="java.lang.String">test:K1</attribute>
+			<attribute name="zaehlung" class="java.lang.String">K1_20240611</attribute>
+			<attribute name="datum" class="java.lang.String">2024-06-11</attribute>
+			<attribute name="wochentag" class="java.lang.String">Di</attribute>
+			<attribute name="tagtyp" class="java.lang.String">Schultag</attribute>
+			<attribute name="fenster" class="java.lang.String">7–19</attribute>
+			<attribute name="art" class="java.lang.String">Knoten</attribute>
+			<attribute name="arm" class="java.lang.String">1 Mittelweg (W)</attribute>
+			<attribute name="seite" class="java.lang.String">Zufahrt</attribute>
+			<attribute name="stroeme" class="java.lang.String">1→2, 1→3, 1→4</attribute>
+			<attribute name="richtung_grad" class="java.lang.Integer">90</attribute>
+			<attribute name="gruppen" class="java.lang.String">Kfz=car</attribute>
+			<attribute name="lage" class="java.lang.String">gps</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">2.4</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="25200" val="39.0"/>
+			<value t="28800" val="42.0"/>
+			<value t="32400" val="45.0"/>
+			<value t="36000" val="48.0"/>
+			<value t="39600" val="51.0"/>
+			<value t="43200" val="54.0"/>
+			<value t="46800" val="57.0"/>
+			<value t="50400" val="60.0"/>
+			<value t="54000" val="63.0"/>
+			<value t="57600" val="66.0"/>
+			<value t="61200" val="69.0"/>
+			<value t="64800" val="72.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k11-k12" id="test:K1/K1_20240611/2aus" name="Mittelweg / Querweg 1" x="390303.57" y="5819324.94">
+		<attributes>
+			<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+			<attribute name="quelle" class="java.lang.String">test</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="stelle" class="java.lang.String">test:K1</attribute>
+			<attribute name="zaehlung" class="java.lang.String">K1_20240611</attribute>
+			<attribute name="datum" class="java.lang.String">2024-06-11</attribute>
+			<attribute name="wochentag" class="java.lang.String">Di</attribute>
+			<attribute name="tagtyp" class="java.lang.String">Schultag</attribute>
+			<attribute name="fenster" class="java.lang.String">7–19</attribute>
+			<attribute name="art" class="java.lang.String">Knoten</attribute>
+			<attribute name="arm" class="java.lang.String">2 Querweg 1 (N)</attribute>
+			<attribute name="seite" class="java.lang.String">Ausfahrt</attribute>
+			<attribute name="stroeme" class="java.lang.String">1→2, 3→2, 4→2</attribute>
+			<attribute name="richtung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="gruppen" class="java.lang.String">Kfz=car</attribute>
+			<attribute name="lage" class="java.lang.String">gps</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">3.6</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="25200" val="86.0"/>
+			<value t="28800" val="89.0"/>
+			<value t="32400" val="92.0"/>
+			<value t="36000" val="95.0"/>
+			<value t="39600" val="98.0"/>
+			<value t="43200" val="101.0"/>
+			<value t="46800" val="104.0"/>
+			<value t="50400" val="107.0"/>
+			<value t="54000" val="110.0"/>
+			<value t="57600" val="113.0"/>
+			<value t="61200" val="116.0"/>
+			<value t="64800" val="119.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k12-k11" id="test:K1/K1_20240611/2zu" name="Mittelweg / Querweg 1" x="390297.55" y="5819325.08">
+		<attributes>
+			<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+			<attribute name="quelle" class="java.lang.String">test</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="stelle" class="java.lang.String">test:K1</attribute>
+			<attribute name="zaehlung" class="java.lang.String">K1_20240611</attribute>
+			<attribute name="datum" class="java.lang.String">2024-06-11</attribute>
+			<attribute name="wochentag" class="java.lang.String">Di</attribute>
+			<attribute name="tagtyp" class="java.lang.String">Schultag</attribute>
+			<attribute name="fenster" class="java.lang.String">7–19</attribute>
+			<attribute name="art" class="java.lang.String">Knoten</attribute>
+			<attribute name="arm" class="java.lang.String">2 Querweg 1 (N)</attribute>
+			<attribute name="seite" class="java.lang.String">Zufahrt</attribute>
+			<attribute name="stroeme" class="java.lang.String">2→1, 2→3, 2→4</attribute>
+			<attribute name="richtung_grad" class="java.lang.Integer">180</attribute>
+			<attribute name="gruppen" class="java.lang.String">Kfz=car</attribute>
+			<attribute name="lage" class="java.lang.String">gps</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">2.4</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="25200" val="68.0"/>
+			<value t="28800" val="71.0"/>
+			<value t="32400" val="74.0"/>
+			<value t="36000" val="77.0"/>
+			<value t="39600" val="80.0"/>
+			<value t="43200" val="83.0"/>
+			<value t="46800" val="86.0"/>
+			<value t="50400" val="89.0"/>
+			<value t="54000" val="92.0"/>
+			<value t="57600" val="95.0"/>
+			<value t="61200" val="98.0"/>
+			<value t="64800" val="101.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k11-k21" id="test:K1/K1_20240611/3aus" name="Mittelweg / Querweg 1" x="390325.0" y="5819296.44">
+		<attributes>
+			<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+			<attribute name="quelle" class="java.lang.String">test</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="stelle" class="java.lang.String">test:K1</attribute>
+			<attribute name="zaehlung" class="java.lang.String">K1_20240611</attribute>
+			<attribute name="datum" class="java.lang.String">2024-06-11</attribute>
+			<attribute name="wochentag" class="java.lang.String">Di</attribute>
+			<attribute name="tagtyp" class="java.lang.String">Schultag</attribute>
+			<attribute name="fenster" class="java.lang.String">7–19</attribute>
+			<attribute name="art" class="java.lang.String">Knoten</attribute>
+			<attribute name="arm" class="java.lang.String">3 Mittelweg (O)</attribute>
+			<attribute name="seite" class="java.lang.String">Ausfahrt</attribute>
+			<attribute name="stroeme" class="java.lang.String">1→3, 2→3, 4→3</attribute>
+			<attribute name="richtung_grad" class="java.lang.Integer">90</attribute>
+			<attribute name="gruppen" class="java.lang.String">Kfz=car</attribute>
+			<attribute name="lage" class="java.lang.String">gps</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">3.6</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="25200" val="79.0"/>
+			<value t="28800" val="82.0"/>
+			<value t="32400" val="85.0"/>
+			<value t="36000" val="88.0"/>
+			<value t="39600" val="91.0"/>
+			<value t="43200" val="94.0"/>
+			<value t="46800" val="97.0"/>
+			<value t="50400" val="100.0"/>
+			<value t="54000" val="103.0"/>
+			<value t="57600" val="106.0"/>
+			<value t="61200" val="109.0"/>
+			<value t="64800" val="112.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k21-k11" id="test:K1/K1_20240611/3zu" name="Mittelweg / Querweg 1" x="390325.13" y="5819302.44">
+		<attributes>
+			<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+			<attribute name="quelle" class="java.lang.String">test</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="stelle" class="java.lang.String">test:K1</attribute>
+			<attribute name="zaehlung" class="java.lang.String">K1_20240611</attribute>
+			<attribute name="datum" class="java.lang.String">2024-06-11</attribute>
+			<attribute name="wochentag" class="java.lang.String">Di</attribute>
+			<attribute name="tagtyp" class="java.lang.String">Schultag</attribute>
+			<attribute name="fenster" class="java.lang.String">7–19</attribute>
+			<attribute name="art" class="java.lang.String">Knoten</attribute>
+			<attribute name="arm" class="java.lang.String">3 Mittelweg (O)</attribute>
+			<attribute name="seite" class="java.lang.String">Zufahrt</attribute>
+			<attribute name="stroeme" class="java.lang.String">3→1, 3→2, 3→4</attribute>
+			<attribute name="richtung_grad" class="java.lang.Integer">270</attribute>
+			<attribute name="gruppen" class="java.lang.String">Kfz=car</attribute>
+			<attribute name="lage" class="java.lang.String">gps</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">2.4</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="25200" val="97.0"/>
+			<value t="28800" val="100.0"/>
+			<value t="32400" val="103.0"/>
+			<value t="36000" val="106.0"/>
+			<value t="39600" val="109.0"/>
+			<value t="43200" val="112.0"/>
+			<value t="46800" val="115.0"/>
+			<value t="50400" val="118.0"/>
+			<value t="54000" val="121.0"/>
+			<value t="57600" val="124.0"/>
+			<value t="61200" val="127.0"/>
+			<value t="64800" val="130.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k11-k10" id="test:K1/K1_20240611/4aus" name="Mittelweg / Querweg 1" x="390296.43" y="5819275.06">
+		<attributes>
+			<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+			<attribute name="quelle" class="java.lang.String">test</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="stelle" class="java.lang.String">test:K1</attribute>
+			<attribute name="zaehlung" class="java.lang.String">K1_20240611</attribute>
+			<attribute name="datum" class="java.lang.String">2024-06-11</attribute>
+			<attribute name="wochentag" class="java.lang.String">Di</attribute>
+			<attribute name="tagtyp" class="java.lang.String">Schultag</attribute>
+			<attribute name="fenster" class="java.lang.String">7–19</attribute>
+			<attribute name="art" class="java.lang.String">Knoten</attribute>
+			<attribute name="arm" class="java.lang.String">4 Querweg 1 (S)</attribute>
+			<attribute name="seite" class="java.lang.String">Ausfahrt</attribute>
+			<attribute name="stroeme" class="java.lang.String">1→4, 2→4, 3→4</attribute>
+			<attribute name="richtung_grad" class="java.lang.Integer">180</attribute>
+			<attribute name="gruppen" class="java.lang.String">Kfz=car</attribute>
+			<attribute name="lage" class="java.lang.String">gps</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">3.6</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="25200" val="72.0"/>
+			<value t="28800" val="75.0"/>
+			<value t="32400" val="78.0"/>
+			<value t="36000" val="81.0"/>
+			<value t="39600" val="84.0"/>
+			<value t="43200" val="87.0"/>
+			<value t="46800" val="90.0"/>
+			<value t="50400" val="93.0"/>
+			<value t="54000" val="96.0"/>
+			<value t="57600" val="99.0"/>
+			<value t="61200" val="102.0"/>
+			<value t="64800" val="105.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k00-k01" id="test:Q1/Q1_20240612/nach1" name="Querweg 0 (nördl. Hauptstraße)" x="390003.01" y="5819149.93">
+		<attributes>
+			<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+			<attribute name="quelle" class="java.lang.String">test</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="stelle" class="java.lang.String">test:Q1</attribute>
+			<attribute name="zaehlung" class="java.lang.String">Q1_20240612</attribute>
+			<attribute name="datum" class="java.lang.String">2024-06-12</attribute>
+			<attribute name="wochentag" class="java.lang.String">Mi</attribute>
+			<attribute name="tagtyp" class="java.lang.String">Schultag</attribute>
+			<attribute name="fenster" class="java.lang.String">7–19</attribute>
+			<attribute name="art" class="java.lang.String">Querschnitt</attribute>
+			<attribute name="arm" class="java.lang.String">1 Querweg 0 (N)</attribute>
+			<attribute name="seite" class="java.lang.String">Richtung</attribute>
+			<attribute name="stroeme" class="java.lang.String">2→1</attribute>
+			<attribute name="richtung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="gruppen" class="java.lang.String">Kfz=car</attribute>
+			<attribute name="lage" class="java.lang.String">gps</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">3.0</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="25200" val="300.0"/>
+			<value t="28800" val="301.0"/>
+			<value t="32400" val="302.0"/>
+			<value t="36000" val="303.0"/>
+			<value t="39600" val="304.0"/>
+			<value t="43200" val="305.0"/>
+			<value t="46800" val="306.0"/>
+			<value t="50400" val="307.0"/>
+			<value t="54000" val="308.0"/>
+			<value t="57600" val="309.0"/>
+			<value t="61200" val="310.0"/>
+			<value t="64800" val="311.0"/>
+		</measurements>
+	</location>
+
+	<location refId="k01-k00" id="test:Q1/Q1_20240612/nach2" name="Querweg 0 (nördl. Hauptstraße)" x="389996.99" y="5819150.06">
+		<attributes>
+			<attribute name="zaehlart" class="java.lang.String">kurzzeit</attribute>
+			<attribute name="quelle" class="java.lang.String">test</attribute>
+			<attribute name="lizenz" class="java.lang.String">dl-de/by-2-0</attribute>
+			<attribute name="stelle" class="java.lang.String">test:Q1</attribute>
+			<attribute name="zaehlung" class="java.lang.String">Q1_20240612</attribute>
+			<attribute name="datum" class="java.lang.String">2024-06-12</attribute>
+			<attribute name="wochentag" class="java.lang.String">Mi</attribute>
+			<attribute name="tagtyp" class="java.lang.String">Schultag</attribute>
+			<attribute name="fenster" class="java.lang.String">7–19</attribute>
+			<attribute name="art" class="java.lang.String">Querschnitt</attribute>
+			<attribute name="arm" class="java.lang.String">2 Querweg 0 (S)</attribute>
+			<attribute name="seite" class="java.lang.String">Richtung</attribute>
+			<attribute name="stroeme" class="java.lang.String">1→2</attribute>
+			<attribute name="richtung_grad" class="java.lang.Integer">180</attribute>
+			<attribute name="gruppen" class="java.lang.String">Kfz=car</attribute>
+			<attribute name="lage" class="java.lang.String">gps</attribute>
+			<attribute name="abstand_m" class="java.lang.Double">3.0</attribute>
+			<attribute name="abweichung_grad" class="java.lang.Integer">0</attribute>
+			<attribute name="zuordnung" class="java.lang.String">automatisch</attribute>
+		</attributes>
+		<measurements type="volumes" networkMode="car" interval="3600">
+			<value t="25200" val="200.0"/>
+			<value t="28800" val="201.0"/>
+			<value t="32400" val="202.0"/>
+			<value t="36000" val="203.0"/>
+			<value t="39600" val="204.0"/>
+			<value t="43200" val="205.0"/>
+			<value t="46800" val="206.0"/>
+			<value t="50400" val="207.0"/>
+			<value t="54000" val="208.0"/>
+			<value t="57600" val="209.0"/>
+			<value t="61200" val="210.0"/>
+			<value t="64800" val="211.0"/>
+		</measurements>
+	</location>
+
+</counts>

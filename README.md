@@ -26,7 +26,8 @@ Detektoren der Verkehrsinformationszentrale.
 2. **Zählstellen:** die Dauerzählstellen der Zählkarte im Gebiet des Netzes, die eine Richtung
    zählen und aus einer Quelle mit Lizenz stammen; die ohne Richtung nur zum Ansehen (siehe
    [unten](#daten-der-zählkarte)). Mit geladenem Netz nennt der Schritt die Zahl der Stellen und
-   Quellen in seinem Gebiet, ganz Deutschland nur in Klammern. Je Gruppe der Zählkarte (`kfz`, `lkw`, `sv`,
+   Quellen in seinem Gebiet, ganz Deutschland nur in Klammern. Ein [Gebiet](#gebiet), gezeichnet
+   oder aus einer Datei, beschränkt die Stellen weiter. Je Gruppe der Zählkarte (`kfz`, `lkw`, `sv`,
    `rad`, `fuss`) lässt sich wählen, ob sie mitkommt, unter welchem `networkMode` sie in die
    counts.xml geht und welche Modi ihr Link erlauben muss. Vorgabe: Kfz als `car`, Rad als `bike`.
    Darunter lassen sich die Kurzzeitzählungen dazunehmen.
@@ -153,6 +154,28 @@ Die Zählkarte rechnet nichts um und füllt nichts auf; das gilt hier auch: Nich
 bleiben leer, Tage mit doppelter Stunde 2–3 Uhr (Zeitumstellung) bleiben draußen, und es gibt
 keine Hochrechnung. Berlins `lkw` ist die Klasse des Detektors, nicht der Schwerverkehr.
 
+## Gebiet
+
+Ohne Gebiet zählen alle Stellen im Rechteck um die Links des Netzes. MATSim-Netze reichen meist
+weit über das Untersuchungsgebiet hinaus; ein Gebiet in Schritt 2 beschränkt die Auswahl auf die
+Stellen darin, die Dauerzählstellen wie die Kurzzeitzählungen, jeweils nach der Lage der Stelle.
+
+- **Zeichnen:** auf der Karte die Ecken klicken; ein Doppelklick, Enter oder ein Klick auf die erste
+  Ecke schließt das Gebiet, ⌫ nimmt die letzte Ecke zurück, Esc bricht ab. Die Ecken eines
+  gezeichneten Gebiets lassen sich danach verschieben.
+- **Laden:** GeoJSON (Polygon oder MultiPolygon, auch als FeatureCollection; ein anderes CRS über
+  das alte Feld `crs`), die `.poly`-Datei von osmium und Osmosis (wie für `osmium extract -p`)
+  oder ein Shapefile, gezippt oder als `.shp` mit `.prj`. Das CRS des Shapefiles kommt aus der
+  `.prj`; bekannte Systeme (ETRS89/UTM, WGS 84/UTM, DHDN/Gauß-Krüger) rechnet die Seite mit ihren
+  eigenen Definitionen samt Datumsverschiebung, andere mit der WKT. Ohne Angabe gelten Grad als
+  WGS 84, sonst das CRS des Netzes, mit Hinweis. Mehrere Flächen und Löcher gehen. Mit mehr als
+  2.000 Punkten vereinfacht die Seite das Gebiet auf 2 m genau, damit der Test je Stelle schnell
+  bleibt.
+
+Draußen ist die Karte abgedunkelt. Der Browser merkt sich das Gebiet; die
+[Konfiguration](#konfiguration) trägt es (als GeoJSON), und die counts.xml nennt es in ihren
+Angaben (`gebiet`). Entscheidungen für Stellen außerhalb bleiben gespeichert.
+
 ## Kurzzeitzählungen
 
 Berlin zählt an Tausenden Knoten und Querschnitten von Hand, je Stelle an einem Tag, meist von 7
@@ -218,7 +241,8 @@ Nach [`counts_v2.xsd`](https://github.com/matsim-org/matsim-libs/blob/main/matsi
   Link, ob die Zuordnung geprüft oder automatisch ist, die Zahl der Tage je Gruppe, der Kommentar
 - in den `attributes` der Datei: die Auswahl in MATSims Schreibweise (`--aggregate`, etwa
   `auswahl=TUESDAY,WEDNESDAY,THURSDAY@2024-07-01:2025-06-30`), Statistik, Mindesttage, Gruppen,
-  Netz, Stand der Zählkarte und je Quelle Lizenz und Quellenvermerk
+  Netz, das [Gebiet](#gebiet), wenn eins gewählt ist, Stand der Zählkarte und je Quelle Lizenz und
+  Quellenvermerk
 
 Ohne Werte in der Auswahl kommt eine Gruppe nicht hinein; ebenso ein Tagesgang ohne alle 24
 Stunden, solange „Nur ganze Tagesgänge“ gewählt ist (wie in MATSims BASt-Werkzeug). MATSim
@@ -303,8 +327,8 @@ einlesen (Schritt 5, „Konfiguration laden“, oder in das Feld von Schritt 1 z
 
 (gekürzt). `netz` sagt, mit welchem Netz gearbeitet wurde: Datei oder Adresse, OSM-Auszug oder
 MATSim-Netz, CRS und ob es aus der Datei kam, Zahl der Links, Gebiet (WGS 84). `daten` nennt Ort
-und Stand der Zählkarte, `einstellungen` alles aus den Schritten 1 bis 5, `ergebnis` und `quellen`
-was dabei herauskam. `entscheidungen` sind nur die von Hand: geprüfte Links mit Anker, ausgelassene
+und Stand der Zählkarte, `einstellungen` alles aus den Schritten 1 bis 5 (darin `gebiet` als
+GeoJSON-Feature oder `null`), `ergebnis` und `quellen` was dabei herauskam. `entscheidungen` sind nur die von Hand: geprüfte Links mit Anker, ausgelassene
 Stellen und Kommentare (`automatisch` mit Kommentar); `in_auswahl: false` sind Entscheidungen für
 dieses Netz, deren Stellen gerade nicht gewählt sind, etwa weil ihre Gruppe aus ist.
 
@@ -351,6 +375,28 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
 `index.json`, je Jahr eine Datei der Ströme), das Beispielnetz (`raw.githubusercontent.com`), Netze aus dem VSP-SVN
 (`svn.vsp.tu-berlin.de`) und die Hintergrundkarte (`tiles.openfreemap.org`, außer bei „Ohne“).
 
+## Tests
+
+```sh
+npm test            # Bausteine (node --test), ohne Abhängigkeiten
+npm ci              # einmal: Playwright für die Browser-Tests
+npx playwright install chromium
+npm run test:web    # Browser-Tests; mit vorhandenem Chrome: CHROME=/pfad/zu/chrome npm run test:web
+```
+
+Die Browser-Tests (`tests/web/`) laufen gegen erfundene Testdaten in `tests/web/fixtures/`: ein
+Gitter aus 12 Knoten mitten in Berlin als MATSim-Netz und als OSM-Auszug, ein Auszug der Zählkarte
+mit neun Dauerzählstellen und zwei Kurzzeitzählungen, ein Gebiet. Neu bauen mit `npm run testdaten`.
+Nach draußen geht keine Anfrage. Sie prüfen den ganzen Ablauf: welche Stelle an welchen Link kommt,
+die Ausgaben gegen erwartete Dateien in `tests/web/erwartet/` (nach einer gewollten Änderung neu
+schreiben mit `ERWARTET_NEU=1 npm run test:web`), ein Mittel von Hand nachgerechnet, Konfiguration
+hin und zurück, das Gebiet, Kurzzeitzählungen und die Übernahme aus einem OSM-Auszug.
+
+Der Workflow „Prüfen und veröffentlichen“ (`.github/workflows/pruefen.yml`) führt beide bei jedem
+Push und Pull Request aus. Auf `main` veröffentlicht er danach die Seite, sobald GitHub Pages auf
+„GitHub Actions“ steht (Einstellungen > Pages > Quelle); solange Pages direkt aus dem Branch
+veröffentlicht, geht die Seite ohne Tests online, und der Workflow sagt das als Hinweis.
+
 ## Dateien
 
 - `index.html`: Oberfläche
@@ -368,8 +414,11 @@ GitHub Pages reicht. Andere Server fragt die Seite nur an für die Daten der Zä
 - `lib/mitteln.js`: Tage wählen, Mittel oder Median
 - `lib/counts.js`: counts.xml schreiben, Zuordnungs-CSV schreiben und lesen
 - `lib/konfig.js`: Konfiguration bauen und lesen
+- `lib/gebiet.js`: Gebiet aus GeoJSON, `.poly` oder Shapefile (auch gezippt), Punkt im Gebiet
 - `vendor/`: MapLibre GL JS, proj4, Schriften
-- `tests/`: Tests der Bausteine, `npm test` (Node 20 oder neuer, ohne Abhängigkeiten)
+- `tests/`: Tests der Bausteine, `npm test` (Node 20 oder neuer, ohne Abhängigkeiten); in
+  `tests/web/` die Browser-Tests mit Testdaten und erwarteten Dateien, `npm run test:web`
+- `playwright.config.js`, `.github/workflows/pruefen.yml`: Browser-Tests, Prüfen vor dem Veröffentlichen
 
 ## Offen
 
