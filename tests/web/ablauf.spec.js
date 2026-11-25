@@ -43,6 +43,31 @@ test("gepackte Netze: .xml.gz und .xml.zst wie .xml, über die Adresse und als D
   await expect(page.locator("#status-text")).toContainText("Die Zstandard-Datei lässt sich nicht entpacken");
 });
 
+test("Netz mit „Atlantis“ und bicycle: CRS aus dem Formular, Rad mit einem Klick", async ({ page, baseURL }) => {
+  // so schreibt MATSim, wenn global.coordinateSystem fehlt; die Koordinaten sind ETRS89 / UTM 33N
+  await oeffne(page, baseURL, { netz: "netz-atlantis.xml.zst", crs: "EPSG:25833" });
+  await expect(page.locator("#crs-platzhalter")).toBeVisible();
+  await expect(page.locator("#crs-platzhalter")).toContainText("Das Netz nennt „Atlantis“");
+  await expect(page.locator("#source")).toContainText("EPSG:25833 aus Formular");
+  const vorher = await stand(page);
+  expect(vorher["test_viz:D1"]).toEqual(STELLEN["test_viz:D1"]);
+  // die Links erlauben bicycle, die Rad-Gruppe sucht bike
+  expect(vorher["test_rad:R1"]).toEqual(["dauer", "ohne", null]);
+  await expect(page.locator("#gruppen-hinweis")).toContainText("Kein Link im Netz erlaubt bike (Rad).");
+  await expect(page.locator("#gruppen-hinweis")).toContainText("Das Netz kennt: car (34), bicycle (28).");
+  await page.click("#gruppen-hinweis button");
+  await fertig(page);
+  await expect(page.locator("#gruppen-hinweis")).toBeHidden();
+  expect(await page.evaluate(() => window.snapper.state.gruppen.rad)).toEqual({ an: true, mode: "bicycle", link: "bicycle" });
+  expect(await stand(page)).toEqual(STELLEN);
+  const counts = (await lade(page, "#counts-xml")).text;
+  const r1 = counts.slice(counts.indexOf('id="test_rad:R1"'));
+  expect(r1.slice(0, r1.indexOf("</location>"))).toContain('networkMode="bicycle"');
+  // ein Netz mit eigenem CRS zeigt den Hinweis nicht
+  await oeffne(page, baseURL);
+  await expect(page.locator("#crs-platzhalter")).toBeHidden();
+});
+
 test("Ausgaben wie erwartet, Mittel nachgerechnet", async ({ page, baseURL }) => {
   await oeffne(page, baseURL);
   const counts = await lade(page, "#counts-xml");

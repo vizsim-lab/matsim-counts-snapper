@@ -792,6 +792,9 @@ function chip(text, extra = "") {
 }
 
 function renderQuelle(n) {
+  const platzhalter = n?.info?.crsPlatzhalter;
+  $("crs-platzhalter").hidden = !platzhalter;
+  if (platzhalter) $("crs-platzhalter").querySelector("small").textContent = `Das Netz nennt „${platzhalter}“ als Koordinatensystem. So schreibt MATSim es, wenn in der Config global.coordinateSystem fehlt; die Koordinaten können trotzdem stimmen. Gelesen mit ${n.info.crs} von hier; liegt das Netz auf der Karte am falschen Ort, hier das richtige eintragen.`;
   // nur die Felder, die für das Netz gelten: der OSM-Filter beim OSM-Auszug, das CRS beim MATSim-Netz
   const osmNetz = n ? Boolean(n.info?.osm) || (!n.info && istOsmName(n.name)) : null;
   $("osm-feld").hidden = osmNetz === false;
@@ -819,7 +822,9 @@ function renderQuelle(n) {
     box.append(chip(osm.filter));
   } else if (n.info) {
     box.append(chip(`${de(n.info.links)} Links`));
-    box.append(chip(n.info.crs + (n.info.crsAusDatei ? "" : " aus Formular"), n.info.crsAusDatei ? "fit" : ""));
+    const crs = chip(n.info.crs + (n.info.crsAusDatei ? "" : " aus Formular"), n.info.crsAusDatei ? "fit" : "");
+    if (n.info.crsPlatzhalter) crs.title = `Das Netz nennt „${n.info.crsPlatzhalter}“: MATSims Vorgabe, wenn beim Schreiben kein Koordinatensystem gesetzt war.`;
+    box.append(crs);
     const w = n.info.wege;
     if (w?.links) {
       const c = chip(`OSM-Weg an ${de((100 * w.links) / n.info.links)} % der Links`);
@@ -1931,7 +1936,47 @@ function renderGruppen() {
       <td class="n">${state.bereich?.dauer ? de(zaehler[g]) : ""}</td>`;
     return tr;
   }));
+  renderModusHinweis();
 }
+
+// Dasselbe Verkehrsmittel unter anderem Namen: MATSim sagt bike, manche Netze bicycle
+const MODUS_GLEICH = { bike: ["bicycle"], bicycle: ["bike"], walk: ["foot"], foot: ["walk"], truck: ["hgv"], hgv: ["truck"] };
+
+/** Eine eingeschaltete Gruppe, deren „Link erlaubt“ im Netz kein Link hat: sagen, was das Netz kennt. */
+function renderModusHinweis() {
+  const box = $("gruppen-hinweis");
+  const modi = state.netz?.info?.modi;
+  const imNetz = new Set(Object.keys(modi ?? {}));
+  const zeilen = [];
+  if (modi) {
+    for (const g of GRUPPEN) {
+      const cfg = state.gruppen[g];
+      if (!cfg.an) continue;
+      const gesucht = cfg.link.split(",").map((m) => m.trim().toLowerCase()).filter(Boolean);
+      if (!gesucht.length || gesucht.some((m) => imNetz.has(m))) continue;
+      const ersatz = gesucht.flatMap((m) => MODUS_GLEICH[m] ?? []).find((m) => imNetz.has(m));
+      const name = state.daten?.gruppenNamen[g] ?? g;
+      const knopf = ersatz ? ` <button type="button" class="linkbtn" data-g="${esc(g)}" data-modus="${esc(ersatz)}">${esc(name)} auf ${esc(ersatz)} stellen</button>` : "";
+      zeilen.push(`Kein Link im Netz erlaubt ${gesucht.map((m) => `<code>${esc(m)}</code>`).join(" oder ")} (${esc(name)}).${knopf}`);
+    }
+  }
+  box.hidden = !zeilen.length;
+  if (!zeilen.length) return;
+  const bekannt = Object.entries(modi).sort((a, b) => b[1] - a[1]).map(([m, n]) => `<code>${esc(m)}</code> (${de(n)})`).join(", ");
+  box.innerHTML = `${zeilen.join(" ")} Das Netz kennt: ${bekannt}.`;
+}
+$("gruppen-hinweis").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-g]");
+  if (!b) return;
+  const cfg = state.gruppen[b.dataset.g];
+  // der networkMode zieht mit, wenn er wie der Link hieß: Die counts.xml soll das Verkehrsmittel des Netzes tragen
+  if (cfg.mode === cfg.link) cfg.mode = b.dataset.modus;
+  cfg.link = b.dataset.modus;
+  store.set("snapper.gruppen", JSON.stringify(state.gruppen));
+  renderGruppen();
+  renderKurz();
+  if (state.netz) waehleStellen();
+});
 $("gruppen-body").addEventListener("change", (e) => {
   const el = e.target;
   const g = el.dataset.g;
